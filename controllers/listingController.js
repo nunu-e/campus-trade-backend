@@ -1,3 +1,4 @@
+// campus-trade-backend/controllers/listingController.js
 const Listing = require("../models/Listing");
 const Transaction = require("../models/Transaction");
 const User = require("../models/User");
@@ -7,6 +8,9 @@ const User = require("../models/User");
 // @access  Private/Verified
 const createListing = async (req, res) => {
   try {
+    console.log("Creating listing with data:", req.body);
+    console.log("User ID:", req.user._id);
+
     const {
       title,
       description,
@@ -21,13 +25,34 @@ const createListing = async (req, res) => {
       serviceType,
     } = req.body;
 
+    // Validate required fields
+    if (
+      !title ||
+      !description ||
+      !price ||
+      !category ||
+      !subcategory ||
+      !location
+    ) {
+      return res.status(400).json({
+        message:
+          "Missing required fields: title, description, price, category, subcategory, location",
+      });
+    }
+
+    if (!images || images.length === 0) {
+      return res.status(400).json({
+        message: "At least one image is required",
+      });
+    }
+
     const listing = await Listing.create({
       title,
       description,
-      price,
+      price: parseFloat(price),
       category,
       subcategory,
-      images,
+      images: Array.isArray(images) ? images : [images],
       location,
       specificLocation,
       condition,
@@ -36,10 +61,23 @@ const createListing = async (req, res) => {
       sellerId: req.user._id,
     });
 
+    console.log("Listing created successfully:", listing._id);
     res.status(201).json(listing);
   } catch (error) {
-    console.error(error);
-    res.status(500).json({ message: "Server error" });
+    console.error("Error creating listing:", error);
+
+    if (error.name === "ValidationError") {
+      const messages = Object.values(error.errors).map((val) => val.message);
+      return res.status(400).json({
+        message: "Validation error",
+        errors: messages,
+      });
+    }
+
+    res.status(500).json({
+      message: "Server error creating listing",
+      error: process.env.NODE_ENV === "development" ? error.message : undefined,
+    });
   }
 };
 
@@ -87,7 +125,7 @@ const getListings = async (req, res) => {
     });
   } catch (error) {
     console.error(error);
-    res.status(500).json({ message: "Server error" });
+    res.status(500).json({ message: "Server error fetching listings" });
   }
 };
 
@@ -108,7 +146,7 @@ const getListingById = async (req, res) => {
     res.json(listing);
   } catch (error) {
     console.error(error);
-    res.status(500).json({ message: "Server error" });
+    res.status(500).json({ message: "Server error fetching listing" });
   }
 };
 
@@ -146,7 +184,7 @@ const updateListing = async (req, res) => {
     res.json(updatedListing);
   } catch (error) {
     console.error(error);
-    res.status(500).json({ message: "Server error" });
+    res.status(500).json({ message: "Server error updating listing" });
   }
 };
 
@@ -180,11 +218,11 @@ const deleteListing = async (req, res) => {
       });
     }
 
-    await listing.remove();
+    await listing.deleteOne();
     res.json({ message: "Listing removed" });
   } catch (error) {
     console.error(error);
-    res.status(500).json({ message: "Server error" });
+    res.status(500).json({ message: "Server error deleting listing" });
   }
 };
 
@@ -200,7 +238,7 @@ const getUserListings = async (req, res) => {
     res.json(listings);
   } catch (error) {
     console.error(error);
-    res.status(500).json({ message: "Server error" });
+    res.status(500).json({ message: "Server error fetching user listings" });
   }
 };
 
@@ -239,7 +277,7 @@ const searchListings = async (req, res) => {
     res.json(listings);
   } catch (error) {
     console.error(error);
-    res.status(500).json({ message: "Server error" });
+    res.status(500).json({ message: "Server error searching listings" });
   }
 };
 
@@ -284,15 +322,13 @@ const reserveListing = async (req, res) => {
     });
   } catch (error) {
     console.error(error);
-    res.status(500).json({ message: "Server error" });
+    res.status(500).json({ message: "Server error reserving listing" });
   }
 };
 
-// campus-trade-backend/controllers/listingController.js
-
-// Add this at the END of the file:
+// ⭐⭐⭐ MUST EXPORT ALL FUNCTIONS ⭐⭐⭐
 module.exports = {
-  createListing, // MUST be exported
+  createListing,
   getListings,
   getListingById,
   updateListing,
