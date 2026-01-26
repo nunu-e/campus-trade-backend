@@ -1,9 +1,9 @@
+// campus-trade-backend/server.js
 const express = require("express");
 const dotenv = require("dotenv");
 const cors = require("cors");
-const path = require("path");
+const http = require("http");
 const connectDB = require("./config/database");
-const { notFound, errorHandler } = require("./middleware/errorMiddleware");
 
 // Load env vars
 dotenv.config();
@@ -12,45 +12,31 @@ dotenv.config();
 connectDB();
 
 const app = express();
+const server = http.createServer(app);
+
+// Enable CORS with specific origin
+const corsOptions = {
+  origin: process.env.FRONTEND_URL || "http://localhost:3000",
+  credentials: true,
+  optionsSuccessStatus: 200,
+};
+app.use(cors(corsOptions));
 
 // Body parser
 app.use(express.json());
 app.use(express.urlencoded({ extended: true }));
 
-// Enable CORS
-app.use(cors());
-
-// Root route
-app.get("/", (req, res) => {
+// Health check route (MUST BE FIRST)
+app.get("/api/health", (req, res) => {
   res.json({
-    message: "Welcome to CampusTrade API",
-    version: "1.0.0",
-    description: "Student-to-Student Marketplace Platform for AAU",
-    documentation: "/api-docs (coming soon)",
-    endpoints: {
-      auth: "/api/auth",
-      users: "/api/users",
-      listings: "/api/listings",
-      transactions: "/api/transactions",
-      messages: "/api/messages",
-      reviews: "/api/reviews",
-      admin: "/api/admin",
-      reports: "/api/reports",
-    },
-  });
-});
-
-// Health check route
-app.get("/health", (req, res) => {
-  res.json({
-    status: "OK",
+    status: "healthy",
     timestamp: new Date().toISOString(),
-    database: "Connected",
-    environment: process.env.NODE_ENV || "development",
+    uptime: process.uptime(),
+    database: "connected",
   });
 });
 
-// Mount routes
+// Mount API routes
 app.use("/api/auth", require("./routes/authRoutes"));
 app.use("/api/users", require("./routes/userRoutes"));
 app.use("/api/listings", require("./routes/listingRoutes"));
@@ -60,31 +46,37 @@ app.use("/api/reviews", require("./routes/reviewRoutes"));
 app.use("/api/admin", require("./routes/adminRoutes"));
 app.use("/api/reports", require("./routes/reportRoutes"));
 
-// Serve static files in production
-if (process.env.NODE_ENV === "production") {
-  app.use(express.static(path.join(__dirname, "../frontend/build")));
+// Root route redirect to health check
+app.get("/", (req, res) => {
+  res.redirect("/api/health");
+});
 
-  app.get("*", (req, res) => {
-    res.sendFile(path.resolve(__dirname, "../frontend/build/index.html"));
+// 404 handler for undefined routes
+app.use("*", (req, res) => {
+  res.status(404).json({
+    success: false,
+    error: "Route not found",
+    message: "Please check the API documentation",
   });
-}
+});
 
 // Error handling middleware
-app.use(notFound);
-app.use(errorHandler);
+app.use((err, req, res, next) => {
+  console.error(err.stack);
+  res.status(500).json({
+    success: false,
+    error: "Internal server error",
+    message:
+      process.env.NODE_ENV === "development"
+        ? err.message
+        : "Something went wrong",
+  });
+});
 
 const PORT = process.env.PORT || 5000;
 
-app.listen(PORT, () => {
-  console.log(`=== CampusTrade Backend Server ===`);
+server.listen(PORT, () => {
   console.log(
-    `Server running in ${process.env.NODE_ENV || "development"} mode`,
+    `Server running in ${process.env.NODE_ENV || "development"} mode on port ${PORT}`,
   );
-  console.log(`Server URL: http://localhost:${PORT}`);
-  console.log(`API Base URL: http://localhost:${PORT}/api`);
-  console.log(`Health Check: http://localhost:${PORT}/health`);
-  console.log(
-    `MongoDB: ${process.env.MONGO_URI || "mongodb://localhost:27017/campustrade"}`,
-  );
-  console.log(`===================================`);
 });

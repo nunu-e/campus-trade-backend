@@ -1,3 +1,4 @@
+# campus-trade-backend/render.yaml
 services:
   - type: web
     name: campus-trade-backend
@@ -15,6 +16,8 @@ services:
       - key: JWT_EXPIRE
         value: 30d
       - key: FRONTEND_URL
-        sync: false
+        value: https://campus-trade.netlify.app
+      - key: MONGO_URI
+        sync: false # You'll set this manually
     healthCheckPath: /api/health
     autoDeploy: true
