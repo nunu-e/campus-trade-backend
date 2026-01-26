@@ -13,128 +13,112 @@ connectDB();
 const app = express();
 const server = http.createServer(app);
 
-// FIXED CORS configuration
+// 1. CORS Middleware - FIRST
 const corsOptions = {
-  origin: function (origin, callback) {
-    // Allow requests with no origin (like mobile apps or curl requests)
-    if (!origin) return callback(null, true);
-
-    const allowedOrigins = [
-      "https://campus-trade-frontend.netlify.app",
-      "http://localhost:3000",
-    ];
-
-    if (allowedOrigins.includes(origin)) {
-      return callback(null, true);
-    } else {
-      console.log("CORS blocked for origin:", origin);
-      return callback(new Error("Not allowed by CORS"));
-    }
-  },
+  origin: [
+    "https://campus-trade-frontend.netlify.app",
+    "http://localhost:3000",
+  ],
   credentials: true,
-  methods: ["GET", "POST", "PUT", "DELETE", "OPTIONS"],
-  allowedHeaders: ["Content-Type", "Authorization", "X-Requested-With"],
-  exposedHeaders: ["Content-Range", "X-Content-Range"],
+  optionsSuccessStatus: 200,
 };
-
 app.use(cors(corsOptions));
 
-// Handle preflight requests
-app.options("*", cors(corsOptions));
-
-// Body parser
+// 2. Body Parser Middleware - SECOND
 app.use(express.json());
 app.use(express.urlencoded({ extended: true }));
 
-// Health check route
+// 3. Request Logger (for debugging)
+app.use((req, res, next) => {
+  console.log(`${new Date().toISOString()} ${req.method} ${req.url}`);
+  console.log("Origin:", req.headers.origin);
+  console.log("User-Agent:", req.headers["user-agent"]?.substring(0, 50));
+  next();
+});
+
+// 4. Health Check - BEFORE other routes
 app.get("/api/health", (req, res) => {
   res.json({
-    status: "healthy",
+    success: true,
+    message: "Server is healthy",
     timestamp: new Date().toISOString(),
     uptime: process.uptime(),
-    database: "connected",
-    cors: "enabled",
-    allowedOrigins: [
-      "https://campus-trade-frontend.netlify.app",
-      "http://localhost:3000",
-    ],
   });
 });
 
-// Root route
+// 5. Root route
 app.get("/", (req, res) => {
   res.json({
-    message: "CampusTrade API",
-    version: "1.0.0",
+    message: "CampusTrade API v1.0",
     endpoints: {
-      auth: "/api/auth",
-      listings: "/api/listings",
-      messages: "/api/messages",
-      admin: "/api/admin",
+      auth: "/api/auth/*",
+      listings: "/api/listings/*",
+      messages: "/api/messages/*",
+      admin: "/api/admin/*",
       health: "/api/health",
     },
-    documentation: "Add /api-docs endpoint for documentation",
   });
 });
 
-// Mount routes
-app.use("/api/auth", require("./routes/authRoutes"));
-app.use("/api/users", require("./routes/userRoutes"));
-app.use("/api/listings", require("./routes/listingRoutes"));
-app.use("/api/transactions", require("./routes/transactionRoutes"));
-app.use("/api/messages", require("./routes/messageRoutes"));
-app.use("/api/reviews", require("./routes/reviewRoutes"));
-app.use("/api/admin", require("./routes/adminRoutes"));
-app.use("/api/reports", require("./routes/reportRoutes"));
+// 6. Import ALL routes first
+const authRoutes = require("./routes/authRoutes");
+const userRoutes = require("./routes/userRoutes");
+const listingRoutes = require("./routes/listingRoutes");
+const transactionRoutes = require("./routes/transactionRoutes");
+const messageRoutes = require("./routes/messageRoutes");
+const reviewRoutes = require("./routes/reviewRoutes");
+const adminRoutes = require("./routes/adminRoutes");
+const reportRoutes = require("./routes/reportRoutes");
+const testRoutes = require("./routes/testRoutes");
 
-// Add test route for debugging
-app.use("/api/test", require("./routes/testRoutes"));
+// 7. Mount ALL routes
+app.use("/api/auth", authRoutes);
+app.use("/api/users", userRoutes);
+app.use("/api/listings", listingRoutes);
+app.use("/api/transactions", transactionRoutes);
+app.use("/api/messages", messageRoutes);
+app.use("/api/reviews", reviewRoutes);
+app.use("/api/admin", adminRoutes);
+app.use("/api/reports", reportRoutes);
+app.use("/api/test", testRoutes);
 
-// 404 handler
+// 8. 404 Handler - AFTER all routes
 app.use("*", (req, res) => {
+  console.log(`404: Route not found: ${req.originalUrl}`);
   res.status(404).json({
     success: false,
     error: "Route not found",
-    message: `Route ${req.originalUrl} not found`,
+    message: `The route ${req.originalUrl} does not exist`,
     availableRoutes: [
-      "/api/auth/register",
-      "/api/auth/login",
-      "/api/listings",
-      "/api/health",
+      "POST /api/auth/register",
+      "POST /api/auth/login",
+      "GET  /api/auth/profile",
+      "GET  /api/listings",
+      "POST /api/listings",
+      "GET  /api/health",
     ],
   });
 });
 
-// Error handler
+// 9. Error Handler - LAST
 app.use((err, req, res, next) => {
-  console.error("Server error:", err);
-
-  // Handle CORS errors
-  if (err.message === "Not allowed by CORS") {
-    return res.status(403).json({
-      success: false,
-      error: "CORS Error",
-      message: "Origin not allowed",
-    });
-  }
-
+  console.error("Server Error:", err.stack);
   res.status(500).json({
     success: false,
-    error: "Internal server error",
+    error: "Internal Server Error",
     message:
-      process.env.NODE_ENV === "development"
-        ? err.message
-        : "Something went wrong",
+      process.env.NODE_ENV === "production"
+        ? "Something went wrong"
+        : err.message,
   });
 });
 
 const PORT = process.env.PORT || 5000;
 
 server.listen(PORT, () => {
+  console.log(`🚀 Server running on port ${PORT}`);
+  console.log(`🌐 Environment: ${process.env.NODE_ENV || "development"}`);
   console.log(
-    `Server running in ${process.env.NODE_ENV || "development"} mode on port ${PORT}`,
-  );
-  console.log(
-    `CORS enabled for: ${process.env.FRONTEND_URL || "http://localhost:3000"}`,
+    `🔗 Frontend URL: ${process.env.FRONTEND_URL || "http://localhost:3000"}`,
   );
 });
