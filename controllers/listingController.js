@@ -288,8 +288,11 @@ const reserveListing = async (req, res) => {
   }
 };
 
+// campus-trade-backend/controllers/listingController.js
+
+// Add this at the END of the file:
 module.exports = {
-  createListing,
+  createListing, // MUST be exported
   getListings,
   getListingById,
   updateListing,
