@@ -1,5 +1,7 @@
 const User = require("../models/User");
 const jwt = require("jsonwebtoken");
+const crypto = require("crypto");
+const emailService = require("../services/emailService");
 
 // Generate JWT Token
 const generateToken = (id) => {
@@ -38,11 +40,13 @@ const registerUser = async (req, res) => {
       });
     }
 
-    // Validate AAU email
-    if (!email.toLowerCase().endsWith("@aau.edu.et")) {
+    // REMOVED: AAU email validation
+    // Accept any valid email
+    const emailRegex = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
+    if (!emailRegex.test(email)) {
       return res.status(400).json({
         success: false,
-        message: "Please use your AAU email address (@aau.edu.et)",
+        message: "Please enter a valid email address",
       });
     }
 
@@ -55,6 +59,9 @@ const registerUser = async (req, res) => {
       });
     }
 
+    // Generate verification code
+    const verificationCode = crypto.randomBytes(20).toString("hex");
+
     // Create user
     const user = await User.create({
       name: name.trim(),
@@ -63,10 +70,26 @@ const registerUser = async (req, res) => {
       phoneNumber: phoneNumber ? phoneNumber.trim() : "",
       department: department.trim(),
       studentID: studentID.trim(),
+      verificationCode: verificationCode,
       isVerified: false,
     });
 
     console.log("User created successfully:", user._id);
+
+    // Send verification email (if email service is enabled)
+    if (process.env.ENABLE_EMAILS === "true") {
+      try {
+        await emailService.sendVerificationEmail(email, name, verificationCode);
+        console.log("Verification email sent to:", email);
+      } catch (emailError) {
+        console.warn("Failed to send verification email:", emailError.message);
+        // Don't fail registration if email fails
+      }
+    } else {
+      // Log verification link in development
+      const verificationLink = `${process.env.APP_URL || "http://localhost:3000"}/verify/${verificationCode}`;
+      console.log("DEVELOPMENT MODE - Verification link:", verificationLink);
+    }
 
     // Generate token
     const token = generateToken(user._id);
@@ -74,7 +97,10 @@ const registerUser = async (req, res) => {
     // Return success response
     res.status(201).json({
       success: true,
-      message: "Registration successful!",
+      message:
+        process.env.ENABLE_EMAILS === "true"
+          ? "Registration successful! Please check your email for verification."
+          : "Registration successful! Please verify your email using the link in console.",
       data: {
         _id: user._id,
         name: user.name,
@@ -155,6 +181,16 @@ const loginUser = async (req, res) => {
       });
     }
 
+    // Check if email is verified
+    if (!user.isVerified) {
+      return res.status(403).json({
+        success: false,
+        message: "Please verify your email first",
+        needsVerification: true,
+        verificationCode: user.verificationCode,
+      });
+    }
+
     // Generate token
     const token = generateToken(user._id);
 
@@ -187,24 +223,41 @@ const verifyEmail = async (req, res) => {
   try {
     const { code } = req.params;
 
-    // For now, auto-verify all users (simplified)
-    // In production, you'd verify against a stored code
-
-    const user = await User.findById(code); // Using code as ID for simplicity
+    // Find user by verification code
+    const user = await User.findOne({ verificationCode: code });
 
     if (!user) {
       return res.status(400).json({
         success: false,
-        message: "Invalid verification code",
+        message: "Invalid or expired verification code",
       });
     }
 
+    // Check if already verified
+    if (user.isVerified) {
+      return res.json({
+        success: true,
+        message: "Email already verified",
+      });
+    }
+
+    // Verify user
     user.isVerified = true;
+    user.verificationCode = undefined; // Clear verification code
     await user.save();
+
+    // Send welcome email
+    if (process.env.ENABLE_EMAILS === "true") {
+      try {
+        await emailService.sendWelcomeEmail(user.email, user.name);
+      } catch (emailError) {
+        console.warn("Failed to send welcome email:", emailError.message);
+      }
+    }
 
     res.json({
       success: true,
-      message: "Email verified successfully",
+      message: "Email verified successfully! You can now login.",
     });
   } catch (error) {
     console.error("Verification error:", error);
@@ -215,12 +268,88 @@ const verifyEmail = async (req, res) => {
   }
 };
 
+// @desc    Resend verification email
+// @route   POST /api/auth/resend-verification
+// @access  Public
+const resendVerification = async (req, res) => {
+  try {
+    const { email } = req.body;
+
+    if (!email) {
+      return res.status(400).json({
+        success: false,
+        message: "Email is required",
+      });
+    }
+
+    const user = await User.findOne({ email: email.toLowerCase() });
+
+    if (!user) {
+      return res.status(404).json({
+        success: false,
+        message: "User not found",
+      });
+    }
+
+    if (user.isVerified) {
+      return res.status(400).json({
+        success: false,
+        message: "Email already verified",
+      });
+    }
+
+    // Generate new verification code
+    const verificationCode = crypto.randomBytes(20).toString("hex");
+    user.verificationCode = verificationCode;
+    await user.save();
+
+    // Send verification email
+    if (process.env.ENABLE_EMAILS === "true") {
+      try {
+        await emailService.sendVerificationEmail(
+          user.email,
+          user.name,
+          verificationCode,
+        );
+
+        res.json({
+          success: true,
+          message: "Verification email sent successfully",
+        });
+      } catch (emailError) {
+        console.error("Failed to send verification email:", emailError);
+        res.status(500).json({
+          success: false,
+          message: "Failed to send verification email",
+        });
+      }
+    } else {
+      // Development mode: return verification link
+      const verificationLink = `${process.env.APP_URL || "http://localhost:3000"}/verify/${verificationCode}`;
+
+      res.json({
+        success: true,
+        message: "Development mode: Use this verification link",
+        verificationLink: verificationLink,
+      });
+    }
+  } catch (error) {
+    console.error("Resend verification error:", error);
+    res.status(500).json({
+      success: false,
+      message: "Server error",
+    });
+  }
+};
+
 // @desc    Get user profile
 // @route   GET /api/auth/profile
 // @access  Private
 const getUserProfile = async (req, res) => {
   try {
-    const user = await User.findById(req.user._id).select("-password");
+    const user = await User.findById(req.user._id).select(
+      "-password -verificationCode",
+    );
 
     if (!user) {
       return res.status(404).json({
@@ -272,6 +401,7 @@ const updateUserProfile = async (req, res) => {
         email: updatedUser.email,
         phoneNumber: updatedUser.phoneNumber,
         department: updatedUser.department,
+        isVerified: updatedUser.isVerified,
       },
     });
   } catch (error) {
@@ -287,6 +417,7 @@ module.exports = {
   registerUser,
   loginUser,
   verifyEmail,
+  resendVerification,
   getUserProfile,
   updateUserProfile,
 };
