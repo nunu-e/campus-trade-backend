@@ -1,33 +1,27 @@
-// campus-trade-backend/routes/listingRoutes.js
 const express = require("express");
 const router = express.Router();
 const { protect, verified } = require("../middleware/authMiddleware");
-const listingController = require("../controllers/listingController");
+const {
+  createListing,
+  getListings,
+  getListingById,
+  updateListing,
+  deleteListing,
+  getUserListings,
+  searchListings,
+  reserveListing,
+} = require("../controllers/listingController"); // CHECK THIS LINE
 
-// Make sure all these functions exist in listingController
-router
-  .route("/")
-  .get(listingController.getListings) // Must exist
-  .post(protect, verified, listingController.createListing); // This is line 15 with error
+router.route("/").get(getListings).post(protect, verified, createListing); // LINE 11 - This is where the error occurs
 
-router.get("/search", listingController.searchListings);
-router.get(
-  "/my-listings",
-  protect,
-  verified,
-  listingController.getUserListings,
-);
-router.post(
-  "/:id/reserve",
-  protect,
-  verified,
-  listingController.reserveListing,
-);
+router.get("/search", searchListings);
+router.get("/my-listings", protect, verified, getUserListings);
+router.post("/:id/reserve", protect, verified, reserveListing);
 
 router
   .route("/:id")
-  .get(listingController.getListingById)
-  .put(protect, verified, listingController.updateListing)
-  .delete(protect, verified, listingController.deleteListing);
+  .get(getListingById)
+  .put(protect, verified, updateListing)
+  .delete(protect, verified, deleteListing);
 
 module.exports = router;
