@@ -201,6 +201,7 @@ const getDashboardStats = async (req, res) => {
       totalTransactions,
       completedTransactions,
       pendingReports,
+      reviews,
     ] = await Promise.all([
       User.countDocuments(),
       User.countDocuments({ status: "active" }),
@@ -209,7 +210,18 @@ const getDashboardStats = async (req, res) => {
       Transaction.countDocuments(),
       Transaction.countDocuments({ status: "Completed" }),
       Report.countDocuments({ status: "Pending" }),
+      Review.find(),
     ]);
+
+    // Calculate average rating from actual reviews
+    let averageRating = 0;
+    if (reviews.length > 0) {
+      const totalRating = reviews.reduce(
+        (sum, review) => sum + review.rating,
+        0,
+      );
+      averageRating = totalRating / reviews.length;
+    }
 
     // Recent activities
     const recentUsers = await User.find()
@@ -239,6 +251,7 @@ const getDashboardStats = async (req, res) => {
         totalTransactions,
         completedTransactions,
         pendingReports,
+        averageRating: parseFloat(averageRating.toFixed(1)),
       },
       recentActivities: {
         users: recentUsers,
