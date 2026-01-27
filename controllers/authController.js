@@ -415,6 +415,108 @@ const updateUserProfile = async (req, res) => {
   }
 };
 
+// @desc    Forgot password - send reset email
+// @route   POST /api/auth/forgot-password
+// @access  Public
+const forgotPassword = async (req, res) => {
+  try {
+    const { email } = req.body;
+
+    if (!email) {
+      return res
+        .status(400)
+        .json({ success: false, message: "Email is required" });
+    }
+
+    const user = await User.findOne({ email: email.toLowerCase() });
+    if (!user) {
+      return res
+        .status(404)
+        .json({ success: false, message: "User not found" });
+    }
+
+    // Generate reset token
+    const resetToken = crypto.randomBytes(20).toString("hex");
+    const resetTokenHashed = crypto
+      .createHash("sha256")
+      .update(resetToken)
+      .digest("hex");
+
+    user.resetPasswordToken = resetTokenHashed;
+    user.resetPasswordExpire = Date.now() + 60 * 60 * 1000; // 1 hour
+
+    await user.save();
+
+    // Build reset link
+    const resetLink = `${process.env.APP_URL || "http://localhost:3000"}/reset-password/${resetToken}`;
+
+    // Send email (best-effort)
+    if (process.env.ENABLE_EMAILS === "true") {
+      try {
+        await emailService.sendResetPasswordEmail(
+          user.email,
+          user.name,
+          resetLink,
+        );
+      } catch (err) {
+        console.warn("Failed to send reset email:", err.message);
+      }
+    }
+
+    res.json({
+      success: true,
+      message: "Password reset email sent (if email is configured)",
+      resetLink: process.env.ENABLE_EMAILS === "true" ? undefined : resetLink,
+    });
+  } catch (error) {
+    console.error("Forgot password error:", error);
+    res.status(500).json({ success: false, message: "Server error" });
+  }
+};
+
+// @desc    Reset password
+// @route   POST /api/auth/reset/:token
+// @access  Public
+const resetPassword = async (req, res) => {
+  try {
+    const { token } = req.params;
+    const { password } = req.body;
+
+    if (!password) {
+      return res
+        .status(400)
+        .json({ success: false, message: "Password is required" });
+    }
+
+    const hashed = crypto.createHash("sha256").update(token).digest("hex");
+
+    const user = await User.findOne({
+      resetPasswordToken: hashed,
+      resetPasswordExpire: { $gt: Date.now() },
+    }).select("+password");
+
+    if (!user) {
+      return res
+        .status(400)
+        .json({ success: false, message: "Invalid or expired reset token" });
+    }
+
+    user.password = password;
+    user.resetPasswordToken = undefined;
+    user.resetPasswordExpire = undefined;
+
+    await user.save();
+
+    res.json({
+      success: true,
+      message: "Password has been reset. You can now login.",
+    });
+  } catch (error) {
+    console.error("Reset password error:", error);
+    res.status(500).json({ success: false, message: "Server error" });
+  }
+};
+
 module.exports = {
   registerUser,
   loginUser,
@@ -422,4 +524,6 @@ module.exports = {
   resendVerification,
   getUserProfile,
   updateUserProfile,
+  forgotPassword,
+  resetPassword,
 };

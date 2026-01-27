@@ -6,6 +6,8 @@ const {
   loginUser,
   verifyEmail,
   resendVerification,
+  forgotPassword,
+  resetPassword,
   getUserProfile,
   updateUserProfile,
 } = require("../controllers/authController");
@@ -15,6 +17,8 @@ router.post("/register", registerUser);
 router.post("/login", loginUser);
 router.get("/verify/:code", verifyEmail);
 router.post("/resend-verification", resendVerification);
+router.post("/forgot-password", forgotPassword);
+router.post("/reset/:token", resetPassword);
 
 // Protected routes
 router
