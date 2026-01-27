@@ -6,7 +6,8 @@ const connectDB = require("./config/database");
 
 // Load env vars
 dotenv.config();
-// Add this after dotenv.config():
+
+// Validate required environment variables
 const requiredEnvVars = ["MONGO_URI", "JWT_SECRET"];
 requiredEnvVars.forEach((envVar) => {
   if (!process.env[envVar]) {
@@ -16,36 +17,38 @@ requiredEnvVars.forEach((envVar) => {
     process.exit(1);
   }
 });
+
 // Connect to database
 connectDB();
 
 const app = express();
 const server = http.createServer(app);
 
-// 1. CORS Middleware - FIRST
+// 1. CORS Middleware
 const corsOptions = {
   origin: [
     "https://campus-trade-frontend.netlify.app",
     "http://localhost:3000",
+    "http://localhost:5000",
   ],
   credentials: true,
   optionsSuccessStatus: 200,
+  methods: ["GET", "POST", "PUT", "DELETE", "PATCH", "OPTIONS"],
+  allowedHeaders: ["Content-Type", "Authorization", "X-Requested-With"],
 };
 app.use(cors(corsOptions));
 
-// 2. Body Parser Middleware - SECOND
+// 2. Body Parser Middleware
 app.use(express.json());
 app.use(express.urlencoded({ extended: true }));
 
-// 3. Request Logger (for debugging)
+// 3. Request Logger
 app.use((req, res, next) => {
   console.log(`${new Date().toISOString()} ${req.method} ${req.url}`);
-  console.log("Origin:", req.headers.origin);
-  console.log("User-Agent:", req.headers["user-agent"]?.substring(0, 50));
   next();
 });
 
-// 4. Health Check - BEFORE other routes
+// 4. Health Check
 app.get("/api/health", (req, res) => {
   res.json({
     success: true,
@@ -69,7 +72,7 @@ app.get("/", (req, res) => {
   });
 });
 
-// 6. Import ALL routes first
+// 6. Import routes
 const authRoutes = require("./routes/authRoutes");
 const userRoutes = require("./routes/userRoutes");
 const listingRoutes = require("./routes/listingRoutes");
@@ -79,7 +82,7 @@ const reviewRoutes = require("./routes/reviewRoutes");
 const adminRoutes = require("./routes/adminRoutes");
 const reportRoutes = require("./routes/reportRoutes");
 
-// 7. Mount ALL routes
+// 7. Mount routes
 app.use("/api/auth", authRoutes);
 app.use("/api/users", userRoutes);
 app.use("/api/listings", listingRoutes);
@@ -89,25 +92,17 @@ app.use("/api/reviews", reviewRoutes);
 app.use("/api/admin", adminRoutes);
 app.use("/api/reports", reportRoutes);
 
-// 8. 404 Handler - AFTER all routes
+// 8. 404 Handler
 app.use("*", (req, res) => {
-  console.log(`404: Route not found: ${req.originalUrl}`);
+  console.log(`404: ${req.method} ${req.originalUrl}`);
   res.status(404).json({
     success: false,
     error: "Route not found",
     message: `The route ${req.originalUrl} does not exist`,
-    availableRoutes: [
-      "POST /api/auth/register",
-      "POST /api/auth/login",
-      "GET  /api/auth/profile",
-      "GET  /api/listings",
-      "POST /api/listings",
-      "GET  /api/health",
-    ],
   });
 });
 
-// 9. Error Handler - LAST
+// 9. Error Handler
 app.use((err, req, res, next) => {
   console.error("Server Error:", err.stack);
   res.status(500).json({
