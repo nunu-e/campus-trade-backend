@@ -76,31 +76,59 @@ const registerUser = async (req, res) => {
 
     console.log("User created successfully:", user._id);
 
-    // Send verification email (if email service is enabled)
-    if (process.env.ENABLE_EMAILS === "true") {
-      try {
-        await emailService.sendVerificationEmail(email, name, verificationCode);
-        console.log("Verification email sent to:", email);
-      } catch (emailError) {
-        console.warn("Failed to send verification email:", emailError.message);
-        // Don't fail registration if email fails
-      }
-    } else {
-      // Log verification link in development
-      const verificationLink = `${process.env.APP_URL || "http://localhost:3000"}/verify/${verificationCode}`;
-      console.log("DEVELOPMENT MODE - Verification link:", verificationLink);
-    }
-
     // Generate token
     const token = generateToken(user._id);
+
+    // Construct verification link
+    const verificationLink = `${process.env.APP_URL || "http://localhost:3000"}/verify/${verificationCode}`;
+
+    // Send verification email
+    let emailSent = false;
+    let emailError = null;
+
+    if (process.env.ENABLE_EMAILS === "true") {
+      try {
+        // Try to send email - wait a reasonable time but don't block registration
+        const emailResult = await Promise.race([
+          emailService.sendVerificationEmail(email, name, verificationCode),
+          new Promise((_, reject) => 
+            setTimeout(() => reject(new Error("Email timeout")), 5000)
+          )
+        ]);
+        
+        if (emailResult && emailResult.success) {
+          emailSent = true;
+          console.log("✅ Verification email sent successfully to:", email);
+        } else {
+          emailError = emailResult?.error || "Unknown error";
+          console.warn("⚠️ Email service returned failure:", emailError);
+        }
+      } catch (emailError) {
+        emailError = emailError.message || "Failed to send email";
+        console.error("❌ Failed to send verification email:", emailError);
+        // Continue with registration even if email fails
+      }
+    } else {
+      // Development mode: Log verification link
+      console.log("═══════════════════════════════════════════════════════");
+      console.log("📧 DEVELOPMENT MODE - Verification Email");
+      console.log("═══════════════════════════════════════════════════════");
+      console.log(`To: ${email}`);
+      console.log(`Name: ${name}`);
+      console.log(`Verification Link: ${verificationLink}`);
+      console.log(`Verification Code: ${verificationCode}`);
+      console.log("═══════════════════════════════════════════════════════");
+    }
 
     // Return success response
     res.status(201).json({
       success: true,
       message:
         process.env.ENABLE_EMAILS === "true"
-          ? "Registration successful! Please check your email for verification."
-          : "Registration successful! Please verify your email using the link in console.",
+          ? emailSent
+            ? "Registration successful! Please check your email for verification."
+            : "Registration successful! However, we couldn't send the verification email. Please contact support or check your email settings."
+          : "Registration successful! Please verify your email using the link shown in the console.",
       data: {
         _id: user._id,
         name: user.name,
@@ -108,7 +136,11 @@ const registerUser = async (req, res) => {
         isVerified: user.isVerified,
         department: user.department,
         token: token,
+        // Include verification link in dev mode
+        ...(process.env.ENABLE_EMAILS !== "true" && { verificationLink }),
       },
+      // Include email status for debugging
+      emailSent: process.env.ENABLE_EMAILS === "true" ? emailSent : true,
     });
   } catch (error) {
     console.error("Registration error:", error);
@@ -305,29 +337,59 @@ const resendVerification = async (req, res) => {
     user.verificationCode = verificationCode;
     await user.save();
 
+    // Construct verification link
+    const verificationLink = `${process.env.APP_URL || "http://localhost:3000"}/verify/${verificationCode}`;
+
     // Send verification email
+    let emailSent = false;
+    let emailError = null;
+
     if (process.env.ENABLE_EMAILS === "true") {
       try {
-        await emailService.sendVerificationEmail(
-          user.email,
-          user.name,
-          verificationCode,
-        );
+        const emailResult = await Promise.race([
+          emailService.sendVerificationEmail(
+            user.email,
+            user.name,
+            verificationCode,
+          ),
+          new Promise((_, reject) => 
+            setTimeout(() => reject(new Error("Email timeout")), 5000)
+          )
+        ]);
 
+        if (emailResult && emailResult.success) {
+          emailSent = true;
+          console.log("✅ Resend verification email sent successfully to:", user.email);
+        } else {
+          emailError = emailResult?.error || "Unknown error";
+          console.warn("⚠️ Resend email service returned failure:", emailError);
+        }
+      } catch (error) {
+        emailError = error.message || "Failed to send email";
+        console.error("❌ Failed to resend verification email:", emailError);
+      }
+
+      if (emailSent) {
         res.json({
           success: true,
-          message: "Verification email sent successfully",
+          message: "Verification email sent successfully. Please check your inbox.",
         });
-      } catch (emailError) {
-        console.error("Failed to send verification email:", emailError);
+      } else {
         res.status(500).json({
           success: false,
-          message: "Failed to send verification email",
+          message: emailError || "Failed to send verification email. Please try again later.",
         });
       }
     } else {
       // Development mode: return verification link
-      const verificationLink = `${process.env.APP_URL || "http://localhost:3000"}/verify/${verificationCode}`;
+      console.log("═══════════════════════════════════════════════════════");
+      console.log("📧 DEVELOPMENT MODE - Resend Verification Email");
+      console.log("═══════════════════════════════════════════════════════");
+      console.log(`To: ${user.email}`);
+      console.log(`Name: ${user.name}`);
+      console.log(`Verification Link: ${verificationLink}`);
+      console.log(`Verification Code: ${verificationCode}`);
+      console.log("═══════════════════════════════════════════════════════");
 
       res.json({
         success: true,

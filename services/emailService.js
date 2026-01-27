@@ -52,19 +52,32 @@ class EmailService {
         };
       }
 
+      // Check if transporter is available
+      if (!this.transporter) {
+        console.error("❌ Email transporter not configured");
+        return { 
+          success: false, 
+          error: "Email transporter not configured. Check EMAIL_USER and EMAIL_PASS environment variables." 
+        };
+      }
+
       const mailOptions = {
         from: `"CampusTrade" <${process.env.EMAIL_USER}>`,
         to: email,
         subject: templates.verification.subject,
-        html: `<p>${templates.verification.text(name, verificationLink)}</p>`,
+        html: templates.verification.text(name, verificationLink),
+        // Plain text fallback
+        text: `Dear ${name},\n\nPlease verify your email address by clicking the following link:\n\n${verificationLink}\n\nIf the link doesn't work, copy and paste it into your browser.\n\nThis link will expire in 24 hours.\n\nCampusTrade Team`,
       };
 
-      await this.transporter.sendMail(mailOptions);
-      console.log("✅ Verification email sent to:", email);
+      const info = await this.transporter.sendMail(mailOptions);
+      console.log("✅ Verification email sent successfully to:", email);
+      console.log("   Message ID:", info.messageId);
 
-      return { success: true, link: verificationLink, code: verificationCode };
+      return { success: true, link: verificationLink, code: verificationCode, messageId: info.messageId };
     } catch (error) {
       console.error("❌ Failed to send verification email:", error.message);
+      console.error("   Error details:", error);
       return { success: false, error: error.message };
     }
   }
