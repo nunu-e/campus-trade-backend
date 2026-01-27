@@ -2,7 +2,6 @@
 const Listing = require("../models/Listing");
 const Transaction = require("../models/Transaction");
 const User = require("../models/User");
-
 // @desc    Create a new listing
 // @route   POST /api/listings
 // @access  Private/Verified
@@ -284,6 +283,7 @@ const searchListings = async (req, res) => {
 // @desc    Reserve a listing
 // @route   POST /api/listings/:id/reserve
 // @access  Private/Verified
+// Fix reserveListing function:
 const reserveListing = async (req, res) => {
   try {
     const listing = await Listing.findById(req.params.id);
@@ -301,6 +301,15 @@ const reserveListing = async (req, res) => {
         .status(400)
         .json({ message: "Cannot reserve your own listing" });
     }
+
+    // Create transaction
+    const transaction = await Transaction.create({
+      buyerId: req.user._id,
+      sellerId: listing.sellerId,
+      listingId: listing._id,
+      amount: listing.price,
+      status: "Initiated",
+    });
 
     // Update listing status
     listing.status = "Reserved";

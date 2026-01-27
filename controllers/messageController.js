@@ -1,6 +1,6 @@
 const Message = require("../models/Message");
 const User = require("../models/User");
-
+const Listing = require("../models/Listing");
 // @desc    Send a message
 // @route   POST /api/messages
 // @access  Private/Verified
@@ -18,8 +18,9 @@ const sendMessage = async (req, res) => {
     if (receiverId === req.user._id.toString()) {
       return res.status(400).json({ message: "Cannot message yourself" });
     }
+    // In sendMessage function, the check will now work
     if (listingId) {
-      const listing = await Listing.findById(listingId);
+      const listing = await Listing.findById(listingId); // This will work now
       if (!listing) {
         return res.status(404).json({ message: "Listing not found" });
       }
