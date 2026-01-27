@@ -12,7 +12,7 @@ const {
   reserveListing,
 } = require("../controllers/listingController"); // CHECK THIS LINE
 
-router.route("/").get(getListings).post(protect, verified, createListing); // LINE 11 - This is where the error occurs
+router.route("/").get(getListings).post(protect, verified, createListing); // LINE 11
 
 router.get("/search", searchListings);
 router.get("/my-listings", protect, verified, getUserListings);
