@@ -18,6 +18,12 @@ const sendMessage = async (req, res) => {
     if (receiverId === req.user._id.toString()) {
       return res.status(400).json({ message: "Cannot message yourself" });
     }
+    if (listingId) {
+      const listing = await Listing.findById(listingId);
+      if (!listing) {
+        return res.status(404).json({ message: "Listing not found" });
+      }
+    }
 
     const message = await Message.create({
       senderId: req.user._id,

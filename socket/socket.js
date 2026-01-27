@@ -2,7 +2,7 @@ const socketIO = require("socket.io");
 const jwt = require("jsonwebtoken");
 const User = require("../models/User");
 const Message = require("../models/Message");
-const Notification = require("../models/Notification");
+const NotificationService = require("../services/notificationService");
 
 const setupWebSocket = (server) => {
   const io = socketIO(server, {
@@ -17,21 +17,23 @@ const setupWebSocket = (server) => {
     try {
       const token = socket.handshake.auth.token;
 
-      if (!token) {
-        return next(new Error("Authentication error"));
-      }
+      if (!token) return next(new Error("Authentication error"));
 
       const decoded = jwt.verify(token, process.env.JWT_SECRET);
       const user = await User.findById(decoded.id);
 
-      if (!user) {
-        return next(new Error("User not found"));
-      }
+      if (!user) return next(new Error("User not found"));
 
-      socket.userId = user._id;
-      socket.user = user;
+      // Attach user info
+      socket.userId = user._id.toString();
+      socket.user = {
+        name: user.name,
+        role: user.role,
+      };
+
       next();
     } catch (error) {
+      console.error("Socket auth failed:", error.message);
       next(new Error("Authentication error"));
     }
   });
@@ -42,19 +44,15 @@ const setupWebSocket = (server) => {
     // Join user's personal room
     socket.join(`user:${socket.userId}`);
 
-    // Handle sending messages
-    socket.on("sendMessage", async (data) => {
+    /** SEND MESSAGE */
+    socket.on("sendMessage", async ({ receiverId, content, listingId }) => {
       try {
-        const { receiverId, content, listingId } = data;
-
-        // Validate receiver
         const receiver = await User.findById(receiverId);
         if (!receiver) {
-          socket.emit("error", { message: "Receiver not found" });
+          socket.emit("messageError", { message: "Receiver not found" });
           return;
         }
 
-        // Create message in database
         const message = await Message.create({
           senderId: socket.userId,
           receiverId,
@@ -62,40 +60,36 @@ const setupWebSocket = (server) => {
           listingId,
         });
 
-        // Populate for sending
         const populatedMessage = await Message.findById(message._id)
           .populate("senderId", "name email")
           .populate("receiverId", "name email");
 
-        // Send to receiver
+        // Send message to receiver and sender
         io.to(`user:${receiverId}`).emit("newMessage", populatedMessage);
-
-        // Also send to sender (for confirmation)
         socket.emit("newMessage", populatedMessage);
 
-        // Create notification for receiver
-        await Notification.create({
-          userId: receiverId,
-          message: `New message from ${socket.user.name}`,
-          type: "Message",
-          relatedId: message._id,
-        });
+        // Create notification using NotificationService
+        await NotificationService.createNotification(
+          receiverId,
+          `New message from ${socket.user.name}`,
+          "Message",
+          message._id,
+        );
 
-        // Send notification to receiver
+        // Emit notification to receiver
         io.to(`user:${receiverId}`).emit("notification", {
           type: "message",
           message: `New message from ${socket.user.name}`,
           data: populatedMessage,
         });
-      } catch (error) {
-        console.error("Error sending message:", error);
-        socket.emit("error", { message: "Failed to send message" });
+      } catch (err) {
+        console.error("Error sending message:", err);
+        socket.emit("messageError", { message: "Failed to send message" });
       }
     });
 
-    // Handle typing indicator
-    socket.on("typing", (data) => {
-      const { receiverId, isTyping } = data;
+    /** TYPING INDICATOR */
+    socket.on("typing", ({ receiverId, isTyping }) => {
       io.to(`user:${receiverId}`).emit("typing", {
         userId: socket.userId,
         userName: socket.user.name,
@@ -103,58 +97,50 @@ const setupWebSocket = (server) => {
       });
     });
 
-    // Handle read receipts
+    /** READ RECEIPTS */
     socket.on("markAsRead", async (messageId) => {
       try {
         const message = await Message.findById(messageId);
-
-        if (
-          message &&
-          message.receiverId.toString() === socket.userId.toString()
-        ) {
+        if (message && message.receiverId.toString() === socket.userId) {
           message.isRead = true;
           await message.save();
 
-          // Notify sender that message was read
           io.to(`user:${message.senderId}`).emit("messageRead", {
             messageId: message._id,
             readAt: new Date(),
           });
         }
-      } catch (error) {
-        console.error("Error marking message as read:", error);
+      } catch (err) {
+        console.error("Error marking message as read:", err);
       }
     });
 
-    // Handle transaction notifications
-    socket.on("transactionUpdate", async (data) => {
-      try {
-        const { transactionId, userId, message } = data;
+    /** TRANSACTION NOTIFICATIONS */
+    socket.on(
+      "transactionUpdate",
+      async ({ transactionId, userId, message }) => {
+        try {
+          const notification = await NotificationService.createNotification(
+            userId,
+            message,
+            "Transaction",
+            transactionId,
+          );
 
-        // Create notification
-        const notification = await Notification.create({
-          userId,
-          message,
-          type: "Transaction",
-          relatedId: transactionId,
-        });
+          io.to(`user:${userId}`).emit("notification", {
+            type: "transaction",
+            message,
+            data: notification,
+          });
+        } catch (err) {
+          console.error("Error sending transaction notification:", err);
+        }
+      },
+    );
 
-        // Send notification
-        io.to(`user:${userId}`).emit("notification", {
-          type: "transaction",
-          message,
-          data: notification,
-        });
-      } catch (error) {
-        console.error("Error sending transaction notification:", error);
-      }
-    });
-
-    // Handle disconnection
+    /** USER DISCONNECTION */
     socket.on("disconnect", () => {
       console.log(`User disconnected: ${socket.userId}`);
-
-      // Broadcast user offline status
       socket.broadcast.emit("userStatus", {
         userId: socket.userId,
         status: "offline",

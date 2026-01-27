@@ -69,7 +69,6 @@ const messageRoutes = require("./routes/messageRoutes");
 const reviewRoutes = require("./routes/reviewRoutes");
 const adminRoutes = require("./routes/adminRoutes");
 const reportRoutes = require("./routes/reportRoutes");
-const testRoutes = require("./routes/testRoutes");
 
 // 7. Mount ALL routes
 app.use("/api/auth", authRoutes);
@@ -80,7 +79,6 @@ app.use("/api/messages", messageRoutes);
 app.use("/api/reviews", reviewRoutes);
 app.use("/api/admin", adminRoutes);
 app.use("/api/reports", reportRoutes);
-app.use("/api/test", testRoutes);
 
 // 8. 404 Handler - AFTER all routes
 app.use("*", (req, res) => {

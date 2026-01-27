@@ -306,15 +306,6 @@ const reserveListing = async (req, res) => {
     listing.status = "Reserved";
     await listing.save();
 
-    // Create transaction record
-    const transaction = await Transaction.create({
-      buyerId: req.user._id,
-      sellerId: listing.sellerId,
-      listingId: listing._id,
-      amount: listing.price,
-      status: "Reserved",
-    });
-
     res.json({
       message: "Listing reserved successfully",
       transaction,

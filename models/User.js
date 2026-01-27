@@ -44,11 +44,6 @@ const userSchema = new mongoose.Schema({
     required: [true, "Student ID is required"],
     trim: true,
   },
-  role: {
-    type: String,
-    enum: ["user", "admin"],
-    default: "user",
-  },
   status: {
     type: String,
     enum: ["active", "suspended", "banned"],
@@ -67,6 +62,11 @@ const userSchema = new mongoose.Schema({
     default: 0,
     min: 0,
     max: 5,
+  },
+  role: {
+    type: String,
+    enum: ["user", "admin"],
+    default: "user",
   },
   totalReviews: {
     type: Number,
