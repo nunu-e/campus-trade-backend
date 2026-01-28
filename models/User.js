@@ -57,6 +57,11 @@ const userSchema = new mongoose.Schema({
     type: String,
     default: null,
   },
+  verificationCodeExpires: {
+    type: Date,
+    default: null,
+  },
+
   resetPasswordToken: {
     type: String,
     default: null,

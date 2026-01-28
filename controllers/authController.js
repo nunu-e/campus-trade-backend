@@ -61,6 +61,7 @@ const registerUser = async (req, res) => {
 
     // Generate verification code
     const verificationCode = crypto.randomBytes(20).toString("hex");
+    const verificationCodeExpires = Date.now() + 24 * 60 * 60 * 1000; // 24 hours
 
     // Create user
     const user = await User.create({
@@ -70,7 +71,8 @@ const registerUser = async (req, res) => {
       phoneNumber: phoneNumber ? phoneNumber.trim() : "",
       department: department.trim(),
       studentID: studentID.trim(),
-      verificationCode: verificationCode,
+      verificationCode,
+      verificationCodeExpires,
       isVerified: false,
     });
 
@@ -91,11 +93,11 @@ const registerUser = async (req, res) => {
         // Try to send email - wait a reasonable time but don't block registration
         const emailResult = await Promise.race([
           emailService.sendVerificationEmail(email, name, verificationCode),
-          new Promise((_, reject) => 
-            setTimeout(() => reject(new Error("Email timeout")), 5000)
-          )
+          new Promise((_, reject) =>
+            setTimeout(() => reject(new Error("Email timeout")), 5000),
+          ),
         ]);
-        
+
         if (emailResult && emailResult.success) {
           emailSent = true;
           console.log("✅ Verification email sent successfully to:", email);
@@ -258,7 +260,10 @@ const verifyEmail = async (req, res) => {
     const { code } = req.params;
 
     // Find user by verification code
-    const user = await User.findOne({ verificationCode: code });
+    const user = await User.findOne({
+      verificationCode: code,
+      verificationCodeExpires: { $gt: Date.now() },
+    });
 
     if (!user) {
       return res.status(400).json({
@@ -277,7 +282,8 @@ const verifyEmail = async (req, res) => {
 
     // Verify user
     user.isVerified = true;
-    user.verificationCode = undefined; // Clear verification code
+    user.verificationCode = null;
+    user.verificationCodeExpires = null;
     await user.save();
 
     // Send welcome email
@@ -335,6 +341,7 @@ const resendVerification = async (req, res) => {
     // Generate new verification code
     const verificationCode = crypto.randomBytes(20).toString("hex");
     user.verificationCode = verificationCode;
+    user.verificationCodeExpires = Date.now() + 24 * 60 * 60 * 1000;
     await user.save();
 
     // Construct verification link
@@ -352,14 +359,17 @@ const resendVerification = async (req, res) => {
             user.name,
             verificationCode,
           ),
-          new Promise((_, reject) => 
-            setTimeout(() => reject(new Error("Email timeout")), 5000)
-          )
+          new Promise((_, reject) =>
+            setTimeout(() => reject(new Error("Email timeout")), 5000),
+          ),
         ]);
 
         if (emailResult && emailResult.success) {
           emailSent = true;
-          console.log("✅ Resend verification email sent successfully to:", user.email);
+          console.log(
+            "✅ Resend verification email sent successfully to:",
+            user.email,
+          );
         } else {
           emailError = emailResult?.error || "Unknown error";
           console.warn("⚠️ Resend email service returned failure:", emailError);
@@ -372,12 +382,15 @@ const resendVerification = async (req, res) => {
       if (emailSent) {
         res.json({
           success: true,
-          message: "Verification email sent successfully. Please check your inbox.",
+          message:
+            "Verification email sent successfully. Please check your inbox.",
         });
       } else {
         res.status(500).json({
           success: false,
-          message: emailError || "Failed to send verification email. Please try again later.",
+          message:
+            emailError ||
+            "Failed to send verification email. Please try again later.",
         });
       }
     } else {
