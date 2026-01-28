@@ -12,7 +12,10 @@ const setupWebSocket = (server) => {
     },
   });
 
-  console.log("Socket.IO configured with origin:", process.env.FRONTEND_URL || "http://localhost:3000");
+  console.log(
+    "Socket.IO configured with origin:",
+    process.env.FRONTEND_URL || "http://localhost:3000",
+  );
 
   // Authentication middleware
   io.use(async (socket, next) => {
