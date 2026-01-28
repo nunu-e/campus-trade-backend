@@ -15,7 +15,7 @@ const {
 router.route("/").get(getListings).post(protect, verified, createListing); // LINE 11
 
 router.get("/search", searchListings);
-router.get("/my-listings", protect, getUserListings);
+router.get("/my-listings", protect, verified getUserListings);
 router.post("/:id/reserve", protect, verified, reserveListing);
 
 router

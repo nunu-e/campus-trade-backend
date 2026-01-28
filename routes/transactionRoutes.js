@@ -12,7 +12,7 @@ const {
 
 router.route("/").post(protect, verified, createTransaction);
 
-router.get("/my-transactions", protect, getUserTransactions);
+router.get("/my-transactions", protect, verified, getUserTransactions);
 router.get("/:id", protect, verified, getTransactionById);
 router.put("/:id/status", protect, verified, updateTransactionStatus);
 router.put("/:id/cancel", protect, verified, cancelTransaction);
