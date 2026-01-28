@@ -25,8 +25,8 @@ const app = express();
 const server = http.createServer(app);
 
 // 1. CORS Middleware
-const FRONTEND_URL = process.env.FRONTEND_URL ||
-  "https://campus-trade-frontend.netlify.app";
+const FRONTEND_URL =
+  process.env.FRONTEND_URL || "https://campus-trade-frontend.netlify.app";
 const allowedOrigins = [FRONTEND_URL, "http://localhost:3000"];
 
 const corsOptions = {
@@ -133,10 +133,12 @@ const PORT = process.env.PORT || 5000;
 
 // Initialize WebSocket support (if socket module available)
 try {
+  console.log("Initializing WebSocket module...");
   const setupWebSocket = require("./socket/socket");
   setupWebSocket(server);
+  console.log("WebSocket module initialized successfully");
 } catch (err) {
-  console.warn("WebSocket setup not found or failed to initialize:", err.message);
+  console.error("WebSocket setup failed to initialize:", err);
 }
 
 server.listen(PORT, () => {
