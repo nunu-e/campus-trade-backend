@@ -25,19 +25,32 @@ const app = express();
 const server = http.createServer(app);
 
 // 1. CORS Middleware
-const corsOptions = {
-  origin: [
-    "https://campus-trade-frontend.netlify.app",
-    "http://localhost:3000",
-    "http://localhost:5000",
-  ],
-  credentials: false,
+const FRONTEND_URL = process.env.FRONTEND_URL ||
+  "https://campus-trade-frontend.netlify.app";
+const allowedOrigins = [FRONTEND_URL, "http://localhost:3000"];
 
+const corsOptions = {
+  origin: function (origin, callback) {
+    // Allow requests with no origin (like curl, server-to-server)
+    if (!origin) return callback(null, true);
+    if (allowedOrigins.indexOf(origin) !== -1) {
+      return callback(null, true);
+    }
+    return callback(new Error("Not allowed by CORS"));
+  },
+  credentials: true,
   optionsSuccessStatus: 200,
   methods: ["GET", "POST", "PUT", "DELETE", "PATCH", "OPTIONS"],
   allowedHeaders: ["Content-Type", "Authorization", "X-Requested-With"],
 };
+
 app.use(cors(corsOptions));
+
+// Ensure Access-Control-Allow-Credentials header present on all responses
+app.use((req, res, next) => {
+  res.header("Access-Control-Allow-Credentials", "true");
+  next();
+});
 
 // 2. Body Parser Middleware
 app.use(express.json());
@@ -118,10 +131,16 @@ app.use((err, req, res, next) => {
 
 const PORT = process.env.PORT || 5000;
 
+// Initialize WebSocket support (if socket module available)
+try {
+  const setupWebSocket = require("./socket/socket");
+  setupWebSocket(server);
+} catch (err) {
+  console.warn("WebSocket setup not found or failed to initialize:", err.message);
+}
+
 server.listen(PORT, () => {
   console.log(`🚀 Server running on port ${PORT}`);
   console.log(`🌐 Environment: ${process.env.NODE_ENV || "development"}`);
-  console.log(
-    `🔗 Frontend URL: ${process.env.FRONTEND_URL || "http://localhost:3000"}`,
-  );
+  console.log(`🔗 Frontend URL: ${FRONTEND_URL}`);
 });
