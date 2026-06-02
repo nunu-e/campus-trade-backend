@@ -16,24 +16,21 @@ class EmailService {
 
       this.transporter = nodemailer.createTransport({
         host: process.env.SMTP_HOST,
-        port: parseInt(process.env.SMTP_PORT) || 587,
-        secure: process.env.SMTP_ENCRYPTION === "tls" ? false : true, // true for 465, false for others
+        port: Number(process.env.SMTP_PORT) || 587,
+        secure: false,
         auth: {
           user: process.env.SMTP_USER,
           pass: process.env.SMTP_PASS,
         },
-        tls: {
-          rejectUnauthorized: false, // only for development, remove in production
-        },
+        connectionTimeout: 30000,
+        greetingTimeout: 30000,
+        socketTimeout: 30000,
       });
 
       // Verify connection
       this.transporter.verify((err, success) => {
         if (err) {
-          console.error(
-            "❌ Email transporter verification failed:",
-            err.message,
-          );
+          console.error("❌ Email transporter verification failed:", err);
         } else {
           console.log("✅ Email transporter ready (Brevo SMTP)");
         }
@@ -82,7 +79,7 @@ class EmailService {
       );
       return { success: true, messageId: info.messageId };
     } catch (error) {
-      console.error("❌ Failed to send OTP email:", error.message);
+      console.error("❌ Failed to send OTP email:", error);
       return { success: false, error: error.message };
     }
   }
