@@ -22,6 +22,7 @@ requiredEnvVars.forEach((envVar) => {
 connectDB();
 
 const app = express();
+app.set("trust proxy", 1);
 const server = http.createServer(app);
 // Security headers
 app.use(helmet());

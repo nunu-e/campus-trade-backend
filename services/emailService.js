@@ -1,144 +1,107 @@
 // services/emailService.js
-const nodemailer = require("nodemailer");
+const Brevo = require("@getbrevo/brevo");
+
+let apiInstance = null;
+
+const initBrevo = () => {
+  if (!process.env.BREVO_API_KEY) {
+    console.error("❌ BREVO_API_KEY not set. Email sending disabled.");
+    return null;
+  }
+  const defaultClient = Brevo.ApiClient.instance;
+  const apiKey = defaultClient.authentications["api-key"];
+  apiKey.apiKey = process.env.BREVO_API_KEY;
+  return new Brevo.TransactionalEmailsApi();
+};
 
 class EmailService {
   constructor() {
     if (process.env.ENABLE_EMAILS === "true") {
-      if (
-        !process.env.SMTP_HOST ||
-        !process.env.SMTP_USER ||
-        !process.env.SMTP_PASS
-      ) {
-        console.error("❌ SMTP credentials missing. Email disabled.");
-        this.transporter = null;
-        return;
+      apiInstance = initBrevo();
+      if (apiInstance) {
+        console.log("✅ Brevo HTTP API ready (HTTPS)");
+      } else {
+        console.error("❌ Brevo API initialization failed");
       }
-
-      this.transporter = nodemailer.createTransport({
-        host: process.env.SMTP_HOST,
-        port: Number(process.env.SMTP_PORT) || 587,
-        secure: false,
-        auth: {
-          user: process.env.SMTP_USER,
-          pass: process.env.SMTP_PASS,
-        },
-        connectionTimeout: 30000,
-        greetingTimeout: 30000,
-        socketTimeout: 30000,
-      });
-
-      // Verify connection
-      this.transporter.verify((err, success) => {
-        if (err) {
-          console.error("❌ Email transporter verification failed:", err);
-        } else {
-          console.log("✅ Email transporter ready (Brevo SMTP)");
-        }
-      });
     } else {
-      this.transporter = null;
       console.log("⚠️ Emails disabled (ENABLE_EMAILS != true)");
     }
   }
 
-  async sendOTPEmail(email, name, otp) {
+  // Helper to send a transactional email
+  async _sendEmail(toEmail, toName, subject, htmlContent, textContent) {
     if (process.env.ENABLE_EMAILS !== "true") {
-      console.log(`[DEV MODE] OTP for ${email}: ${otp}`);
-      return { success: true, devMode: true, otp };
+      console.log(`[DEV MODE] Would send email to ${toEmail}: ${subject}`);
+      return { success: true, devMode: true };
     }
 
-    if (!this.transporter) {
-      console.error("❌ Email transporter not configured");
+    if (!apiInstance) {
+      console.error("❌ Brevo API not initialized");
       return { success: false, error: "Email service not configured" };
     }
 
-    const mailOptions = {
-      from: `"${process.env.SENDER_NAME}" <${process.env.SENDER_EMAIL}>`,
-      to: email,
-      subject: "CampusTrade Email Verification Code",
-      html: `
-        <div style="font-family: Arial, sans-serif; max-width: 600px;">
-          <h2>Email Verification</h2>
-          <p>Hello ${name},</p>
-          <p>Your verification code is:</p>
-          <div style="font-size: 32px; font-weight: bold; padding: 10px; background: #f0f0f0; text-align: center;">
-            ${otp}
-          </div>
-          <p>This code expires in <strong>10 minutes</strong>.</p>
-          <p>If you did not request this, please ignore this email.</p>
-          <p>Best regards,<br/>CampusTrade Team</p>
-        </div>
-      `,
-      text: `Your verification code is: ${otp}. It expires in 10 minutes.`,
+    const sender = {
+      email: process.env.SENDER_EMAIL || "noreply@campustrade.com",
+      name: process.env.SENDER_NAME || "CampusTrade",
     };
+    const recipients = { to: [{ email: toEmail, name: toName }] };
+
+    const sendSmtpEmail = new Brevo.SendSmtpEmail();
+    sendSmtpEmail.sender = sender;
+    sendSmtpEmail.to = recipients.to;
+    sendSmtpEmail.subject = subject;
+    sendSmtpEmail.htmlContent = htmlContent;
+    sendSmtpEmail.textContent = textContent;
 
     try {
-      const info = await this.transporter.sendMail(mailOptions);
+      const result = await apiInstance.sendTransacEmail(sendSmtpEmail);
       console.log(
-        `✅ OTP email sent to ${email}, messageId: ${info.messageId}`,
+        `✅ Email sent to ${toEmail}, messageId: ${result.messageId}`,
       );
-      return { success: true, messageId: info.messageId };
+      return { success: true, messageId: result.messageId };
     } catch (error) {
-      console.error("❌ Failed to send OTP email:", error);
-      return { success: false, error: error.message };
+      console.error("❌ Brevo API error:", error);
+      return { success: false, error: error.message || "Failed to send email" };
     }
+  }
+
+  async sendOTPEmail(email, name, otp) {
+    const subject = "CampusTrade Email Verification Code";
+    const htmlContent = `
+      <div style="font-family: Arial, sans-serif; max-width: 600px;">
+        <h2>Email Verification</h2>
+        <p>Hello ${name},</p>
+        <p>Your verification code is:</p>
+        <div style="font-size: 32px; font-weight: bold; padding: 10px; background: #f0f0f0; text-align: center;">
+          ${otp}
+        </div>
+        <p>This code expires in <strong>10 minutes</strong>.</p>
+        <p>If you did not request this, please ignore this email.</p>
+        <p>Best regards,<br/>CampusTrade Team</p>
+      </div>
+    `;
+    const textContent = `Your verification code is: ${otp}. It expires in 10 minutes.`;
+    return this._sendEmail(email, name, subject, htmlContent, textContent);
   }
 
   async sendWelcomeEmail(email, name) {
-    if (process.env.ENABLE_EMAILS !== "true") {
-      console.log("DEV MODE - Welcome email to:", email);
-      return { success: true };
-    }
-    const mailOptions = {
-      from: `"${process.env.SENDER_NAME}" <${process.env.SENDER_EMAIL}>`,
-      to: email,
-      subject: "Welcome to CampusTrade!",
-      html: `<p>Hello ${name},</p><p>Thank you for joining CampusTrade!</p>`,
-    };
-    try {
-      await this.transporter.sendMail(mailOptions);
-      return { success: true };
-    } catch (error) {
-      return { success: false, error: error.message };
-    }
+    const subject = "Welcome to CampusTrade!";
+    const htmlContent = `<p>Hello ${name},</p><p>Thank you for joining CampusTrade!</p>`;
+    const textContent = `Hello ${name},\n\nThank you for joining CampusTrade!`;
+    return this._sendEmail(email, name, subject, htmlContent, textContent);
   }
 
   async sendNotificationEmail(email, subject, message) {
-    if (process.env.ENABLE_EMAILS !== "true") {
-      console.log("DEV MODE - Notification to:", email);
-      return { success: true };
-    }
-    const mailOptions = {
-      from: `"${process.env.SENDER_NAME}" <${process.env.SENDER_EMAIL}>`,
-      to: email,
-      subject,
-      html: `<p>${message}</p>`,
-    };
-    try {
-      await this.transporter.sendMail(mailOptions);
-      return { success: true };
-    } catch (error) {
-      return { success: false, error: error.message };
-    }
+    const htmlContent = `<p>${message}</p>`;
+    const textContent = message;
+    return this._sendEmail(email, "", subject, htmlContent, textContent);
   }
 
   async sendResetPasswordEmail(email, name, resetLink) {
-    if (process.env.ENABLE_EMAILS !== "true") {
-      console.log("DEV MODE - Reset link:", resetLink);
-      return { success: true, link: resetLink };
-    }
-    const mailOptions = {
-      from: `"${process.env.SENDER_NAME}" <${process.env.SENDER_EMAIL}>`,
-      to: email,
-      subject: "Reset your CampusTrade password",
-      html: `<p>Dear ${name},</p><p>Use the link below to reset your password (valid for 1 hour):</p><p><a href="${resetLink}">${resetLink}</a></p>`,
-    };
-    try {
-      await this.transporter.sendMail(mailOptions);
-      return { success: true };
-    } catch (error) {
-      return { success: false, error: error.message };
-    }
+    const subject = "Reset your CampusTrade password";
+    const htmlContent = `<p>Dear ${name},</p><p>Use the link below to reset your password (valid for 1 hour):</p><p><a href="${resetLink}">${resetLink}</a></p>`;
+    const textContent = `Dear ${name},\n\nUse the following link to reset your password (valid for 1 hour):\n${resetLink}`;
+    return this._sendEmail(email, name, subject, htmlContent, textContent);
   }
 }
 
