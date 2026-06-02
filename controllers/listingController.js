@@ -1,7 +1,16 @@
-// campus-trade-backend/controllers/listingController.js
 const Listing = require("../models/Listing");
 const Transaction = require("../models/Transaction");
 const User = require("../models/User");
+
+const mapFrontendCategory = (category) => {
+  const map = {
+    Sell: "Goods",
+    Rent: "Rentals",
+    Service: "Services",
+  };
+  return map[category] || category;
+};
+
 // @desc    Create a new listing
 // @route   POST /api/listings
 // @access  Private/Verified
@@ -10,7 +19,7 @@ const createListing = async (req, res) => {
     console.log("Creating listing with data:", req.body);
     console.log("User ID:", req.user._id);
 
-    const {
+    let {
       title,
       description,
       price,
@@ -24,55 +33,84 @@ const createListing = async (req, res) => {
       serviceType,
     } = req.body;
 
+    // --- Category mapping (frontend -> backend) ---
+    const normalizedCategory = mapFrontendCategory(category);
+    if (!["Goods", "Services", "Rentals"].includes(normalizedCategory)) {
+      return res.status(400).json({
+        message: "Invalid category. Allowed: 'Sell', 'Rent', 'Service'.",
+      });
+    }
+
     // Validate required fields
-    if (
-      !title ||
-      !description ||
-      !price ||
-      !category ||
-      !subcategory ||
-      !location
-    ) {
+    if (!title || !description || !price || !subcategory || !location) {
       return res.status(400).json({
         message:
-          "Missing required fields: title, description, price, category, subcategory, location",
+          "Missing required fields: title, description, price, subcategory, location",
       });
     }
 
     if (!images || images.length === 0) {
-      return res.status(400).json({
-        message: "At least one image is required",
-      });
+      return res
+        .status(400)
+        .json({ message: "At least one image is required" });
     }
 
-    const listing = await Listing.create({
+    // Build listing object
+    const listingData = {
       title,
       description,
       price: parseFloat(price),
-      category,
+      category: normalizedCategory,
       subcategory,
       images: Array.isArray(images) ? images : [images],
       location,
-      specificLocation,
-      condition,
-      rentalPeriod,
-      serviceType,
+      specificLocation: specificLocation || undefined,
       sellerId: req.user._id,
-    });
+    };
 
+    // Add category-specific fields
+    if (normalizedCategory === "Goods") {
+      if (!condition) {
+        return res
+          .status(400)
+          .json({ message: "Condition is required for goods" });
+      }
+      listingData.condition = condition;
+    } else if (normalizedCategory === "Services") {
+      if (!serviceType) {
+        return res
+          .status(400)
+          .json({ message: "Service type is required for services" });
+      }
+      listingData.serviceType = serviceType;
+    } else if (normalizedCategory === "Rentals") {
+      if (!rentalPeriod || !rentalPeriod.duration || !rentalPeriod.unit) {
+        return res
+          .status(400)
+          .json({ message: "Rental duration and unit are required" });
+      }
+      if (!["Day", "Week", "Month"].includes(rentalPeriod.unit)) {
+        return res
+          .status(400)
+          .json({ message: "Rental unit must be Day, Week, or Month" });
+      }
+      listingData.rentalPeriod = {
+        duration: parseInt(rentalPeriod.duration),
+        unit: rentalPeriod.unit,
+      };
+    }
+
+    const listing = await Listing.create(listingData);
     console.log("Listing created successfully:", listing._id);
     res.status(201).json(listing);
   } catch (error) {
     console.error("Error creating listing:", error);
-
     if (error.name === "ValidationError") {
       const messages = Object.values(error.errors).map((val) => val.message);
-      return res.status(400).json({
-        message: "Validation error",
-        errors: messages,
-      });
+      return res
+        .status(400)
+        .json({ message: "Validation error", errors: messages });
     }
-
     res.status(500).json({
       message: "Server error creating listing",
       error: process.env.NODE_ENV === "development" ? error.message : undefined,
@@ -98,7 +136,6 @@ const getListings = async (req, res) => {
 
     let query = { status };
 
-    // Apply filters
     if (category) query.category = category;
     if (location) query.location = location;
     if (minPrice || maxPrice) {
@@ -137,11 +174,7 @@ const getListingById = async (req, res) => {
       "sellerId",
       "name email phoneNumber department rating totalReviews",
     );
-
-    if (!listing) {
-      return res.status(404).json({ message: "Listing not found" });
-    }
-
+    if (!listing) return res.status(404).json({ message: "Listing not found" });
     res.json(listing);
   } catch (error) {
     console.error(error);
@@ -155,31 +188,44 @@ const getListingById = async (req, res) => {
 const updateListing = async (req, res) => {
   try {
     const listing = await Listing.findById(req.params.id);
-
-    if (!listing) {
-      return res.status(404).json({ message: "Listing not found" });
-    }
-
-    // Check ownership
+    if (!listing) return res.status(404).json({ message: "Listing not found" });
     if (listing.sellerId.toString() !== req.user._id.toString()) {
       return res
         .status(403)
         .json({ message: "Not authorized to update this listing" });
     }
-
-    // Cannot update if reserved or sold
     if (listing.status !== "Available") {
       return res
         .status(400)
         .json({ message: "Cannot update a reserved or sold listing" });
     }
 
+    let updateData = { ...req.body };
+    // Normalize category if provided
+    if (updateData.category) {
+      updateData.category = mapFrontendCategory(updateData.category);
+    }
+    // Handle rentalPeriod if category is Rentals
+    if (updateData.rentalPeriod && listing.category === "Rentals") {
+      if (!updateData.rentalPeriod.duration || !updateData.rentalPeriod.unit) {
+        return res
+          .status(400)
+          .json({ message: "Rental duration and unit required" });
+      }
+      updateData.rentalPeriod = {
+        duration: parseInt(updateData.rentalPeriod.duration),
+        unit: updateData.rentalPeriod.unit,
+      };
+    }
+
     const updatedListing = await Listing.findByIdAndUpdate(
       req.params.id,
-      req.body,
-      { new: true, runValidators: true },
+      updateData,
+      {
+        new: true,
+        runValidators: true,
+      },
     );
-
     res.json(updatedListing);
   } catch (error) {
     console.error(error);
@@ -193,30 +239,21 @@ const updateListing = async (req, res) => {
 const deleteListing = async (req, res) => {
   try {
     const listing = await Listing.findById(req.params.id);
-
-    if (!listing) {
-      return res.status(404).json({ message: "Listing not found" });
-    }
-
-    // Check ownership
+    if (!listing) return res.status(404).json({ message: "Listing not found" });
     if (listing.sellerId.toString() !== req.user._id.toString()) {
       return res
         .status(403)
         .json({ message: "Not authorized to delete this listing" });
     }
-
-    // Check if there are active transactions
     const activeTransaction = await Transaction.findOne({
       listingId: listing._id,
       status: { $in: ["Initiated", "Reserved"] },
     });
-
     if (activeTransaction) {
-      return res.status(400).json({
-        message: "Cannot delete listing with active transactions",
-      });
+      return res
+        .status(400)
+        .json({ message: "Cannot delete listing with active transactions" });
     }
-
     await listing.deleteOne();
     res.json({ message: "Listing removed" });
   } catch (error) {
@@ -233,7 +270,6 @@ const getUserListings = async (req, res) => {
     const listings = await Listing.find({ sellerId: req.user._id }).sort(
       "-createdAt",
     );
-
     res.json(listings);
   } catch (error) {
     console.error(error);
@@ -254,12 +290,8 @@ const searchListings = async (req, res) => {
       maxPrice,
       sort = "-createdAt",
     } = req.query;
-
     let query = { status: "Available" };
-
-    if (q) {
-      query.$text = { $search: q };
-    }
+    if (q) query.$text = { $search: q };
     if (category) query.category = category;
     if (location) query.location = location;
     if (minPrice || maxPrice) {
@@ -267,12 +299,10 @@ const searchListings = async (req, res) => {
       if (minPrice) query.price.$gte = Number(minPrice);
       if (maxPrice) query.price.$lte = Number(maxPrice);
     }
-
     const listings = await Listing.find(query)
       .populate("sellerId", "name rating")
       .sort(sort)
       .limit(50);
-
     res.json(listings);
   } catch (error) {
     console.error(error);
@@ -283,26 +313,17 @@ const searchListings = async (req, res) => {
 // @desc    Reserve a listing
 // @route   POST /api/listings/:id/reserve
 // @access  Private/Verified
-// Fix reserveListing function:
 const reserveListing = async (req, res) => {
   try {
     const listing = await Listing.findById(req.params.id);
-
-    if (!listing) {
-      return res.status(404).json({ message: "Listing not found" });
-    }
-
-    if (listing.status !== "Available") {
+    if (!listing) return res.status(404).json({ message: "Listing not found" });
+    if (listing.status !== "Available")
       return res.status(400).json({ message: "Listing is not available" });
-    }
-
     if (listing.sellerId.toString() === req.user._id.toString()) {
       return res
         .status(400)
         .json({ message: "Cannot reserve your own listing" });
     }
-
-    // Create transaction
     const transaction = await Transaction.create({
       buyerId: req.user._id,
       sellerId: listing.sellerId,
@@ -310,11 +331,8 @@ const reserveListing = async (req, res) => {
       amount: listing.price,
       status: "Initiated",
     });
-
-    // Update listing status
     listing.status = "Reserved";
     await listing.save();
-
     res.json({
       message: "Listing reserved successfully",
       transaction,
@@ -326,7 +344,6 @@ const reserveListing = async (req, res) => {
   }
 };
 
-// ⭐⭐⭐ MUST EXPORT ALL FUNCTIONS ⭐⭐⭐
 module.exports = {
   createListing,
   getListings,

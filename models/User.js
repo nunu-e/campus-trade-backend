@@ -29,6 +29,23 @@ const userSchema = new mongoose.Schema({
     minlength: [6, "Password must be at least 6 characters"],
     select: false,
   },
+  // Add these fields inside the userSchema definition
+  otpCode: {
+    type: String,
+    default: null,
+  },
+  otpExpires: {
+    type: Date,
+    default: null,
+  },
+  otpAttempts: {
+    type: Number,
+    default: 0,
+  },
+  otpLockUntil: {
+    type: Date,
+    default: null,
+  },
   phoneNumber: {
     type: String,
     trim: true,

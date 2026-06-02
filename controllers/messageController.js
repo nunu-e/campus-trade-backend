@@ -51,18 +51,29 @@ const sendMessage = async (req, res) => {
 const getConversation = async (req, res) => {
   try {
     const otherUserId = req.params.userId;
+    const page = parseInt(req.query.page) || 1;
+    const limit = parseInt(req.query.limit) || 50;
+    const skip = (page - 1) * limit;
 
-    const messages = await Message.find({
+    const query = {
       $or: [
         { senderId: req.user._id, receiverId: otherUserId },
         { senderId: otherUserId, receiverId: req.user._id },
       ],
-    })
-      .populate("senderId", "name email")
-      .populate("receiverId", "name email")
-      .sort("createdAt");
+    };
 
-    // Mark messages as read
+    const [messages, total] = await Promise.all([
+      Message.find(query)
+        .populate("senderId", "name email")
+        .populate("receiverId", "name email")
+        .sort({ createdAt: -1 }) // newest first
+        .skip(skip)
+        .limit(limit)
+        .lean(),
+      Message.countDocuments(query),
+    ]);
+
+    // Mark unread messages as read (only for messages sent by the other user to current user)
     await Message.updateMany(
       {
         senderId: otherUserId,
@@ -72,7 +83,17 @@ const getConversation = async (req, res) => {
       { isRead: true },
     );
 
-    res.json(messages);
+    res.json({
+      messages,
+      pagination: {
+        page,
+        limit,
+        total,
+        totalPages: Math.ceil(total / limit),
+        hasNextPage: page < Math.ceil(total / limit),
+        hasPrevPage: page > 1,
+      },
+    });
   } catch (error) {
     console.error(error);
     res.status(500).json({ message: "Server error" });

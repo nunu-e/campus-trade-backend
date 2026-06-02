@@ -2,7 +2,7 @@ const User = require("../models/User");
 const jwt = require("jsonwebtoken");
 const crypto = require("crypto");
 const emailService = require("../services/emailService");
-
+const { generateOTP, isOTPExpired, hashOTP } = require("../utils/otp");
 // Generate JWT Token
 const generateToken = (id) => {
   return jwt.sign({ id }, process.env.JWT_SECRET || "fallback_secret", {
@@ -32,7 +32,6 @@ const registerUser = async (req, res) => {
       "studentID",
     ];
     const missingFields = requiredFields.filter((field) => !req.body[field]);
-
     if (missingFields.length > 0) {
       return res.status(400).json({
         success: false,
@@ -40,8 +39,6 @@ const registerUser = async (req, res) => {
       });
     }
 
-    // REMOVED: AAU email validation
-    // Accept any valid email
     const emailRegex = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
     if (!emailRegex.test(email)) {
       return res.status(400).json({
@@ -59,11 +56,7 @@ const registerUser = async (req, res) => {
       });
     }
 
-    // Generate verification code
-    const verificationCode = crypto.randomBytes(20).toString("hex");
-    const verificationCodeExpires = Date.now() + 24 * 60 * 60 * 1000; // 24 hours
-
-    // Create user
+    // Create user (without old verification fields)
     const user = await User.create({
       name: name.trim(),
       email: email.toLowerCase().trim(),
@@ -71,101 +64,62 @@ const registerUser = async (req, res) => {
       phoneNumber: phoneNumber ? phoneNumber.trim() : "",
       department: department.trim(),
       studentID: studentID.trim(),
-      verificationCode,
-      verificationCodeExpires,
       isVerified: false,
     });
 
     console.log("User created successfully:", user._id);
 
-    // Generate token
-    const token = generateToken(user._id);
+    // Generate OTP
+    const otpCode = generateOTP();
+    user.otpCode = otpCode;
+    user.otpExpires = Date.now() + 10 * 60 * 1000; // 10 minutes
+    user.otpAttempts = 0;
+    await user.save();
 
-    // Construct verification link
-    const verificationLink = `${process.env.APP_URL || "http://localhost:3000"}/verify/${verificationCode}`;
-
-    // Send verification email
+    // Send OTP email
     let emailSent = false;
-    let emailError = null;
-
     if (process.env.ENABLE_EMAILS === "true") {
-      try {
-        // Try to send email - wait a reasonable time but don't block registration
-        const emailResult = await Promise.race([
-          emailService.sendVerificationEmail(email, name, verificationCode),
-          new Promise((_, reject) =>
-            setTimeout(() => reject(new Error("Email timeout")), 5000),
-          ),
-        ]);
-
-        if (emailResult && emailResult.success) {
-          emailSent = true;
-          console.log("✅ Verification email sent successfully to:", email);
-        } else {
-          emailError = emailResult?.error || "Unknown error";
-          console.warn("⚠️ Email service returned failure:", emailError);
-        }
-      } catch (emailError) {
-        emailError = emailError.message || "Failed to send email";
-        console.error("❌ Failed to send verification email:", emailError);
-        // Continue with registration even if email fails
-      }
+      const result = await emailService.sendOTPEmail(
+        user.email,
+        user.name,
+        otpCode,
+      );
+      if (result && result.success) emailSent = true;
     } else {
-      // Development mode: Log verification link
-      console.log("═══════════════════════════════════════════════════════");
-      console.log("📧 DEVELOPMENT MODE - Verification Email");
-      console.log("═══════════════════════════════════════════════════════");
-      console.log(`To: ${email}`);
-      console.log(`Name: ${name}`);
-      console.log(`Verification Link: ${verificationLink}`);
-      console.log(`Verification Code: ${verificationCode}`);
-      console.log("═══════════════════════════════════════════════════════");
+      console.log(`[DEV MODE] OTP for ${user.email}: ${otpCode}`);
+      emailSent = true;
     }
 
-    // Return success response
+    // Generate token (optional – you can require verification before login)
+    const token = generateToken(user._id);
+
     res.status(201).json({
       success: true,
-      message:
-        process.env.ENABLE_EMAILS === "true"
-          ? emailSent
-            ? "Registration successful! Please check your email for verification."
-            : "Registration successful! However, we couldn't send the verification email. Please contact support or check your email settings."
-          : "Registration successful! Please verify your email using the link shown in the console.",
+      message: emailSent
+        ? "Registration successful! Please check your email for the verification code."
+        : "Registration successful but we could not send the verification code. Please contact support.",
       data: {
         _id: user._id,
         name: user.name,
         email: user.email,
         isVerified: user.isVerified,
         department: user.department,
-        token: token,
-        // Include verification link in dev mode
-        ...(process.env.ENABLE_EMAILS !== "true" && { verificationLink }),
       },
-      // Include email status for debugging
-      emailSent: process.env.ENABLE_EMAILS === "true" ? emailSent : true,
+      ...(process.env.ENABLE_EMAILS !== "true" && { devOtp: otpCode }),
     });
   } catch (error) {
     console.error("Registration error:", error);
-
-    // Handle Mongoose validation errors
     if (error.name === "ValidationError") {
       const errors = Object.values(error.errors).map((err) => err.message);
-      return res.status(400).json({
-        success: false,
-        message: "Validation failed",
-        errors: errors,
-      });
+      return res
+        .status(400)
+        .json({ success: false, message: "Validation failed", errors });
     }
-
-    // Handle duplicate key errors
     if (error.code === 11000) {
-      return res.status(400).json({
-        success: false,
-        message: "Duplicate field value entered",
-      });
+      return res
+        .status(400)
+        .json({ success: false, message: "Duplicate field value entered" });
     }
-
-    // Generic server error
     res.status(500).json({
       success: false,
       message: "Server error during registration",
@@ -418,7 +372,191 @@ const resendVerification = async (req, res) => {
     });
   }
 };
+// @desc    Resend OTP for verification
+// @route   POST /api/auth/send-otp
+// @access  Public
+const sendOTP = async (req, res) => {
+  try {
+    const { email } = req.body;
+    if (!email) {
+      return res
+        .status(400)
+        .json({ success: false, message: "Email is required" });
+    }
 
+    const user = await User.findOne({ email: email.toLowerCase() });
+    if (!user) {
+      // Prevent email enumeration
+      return res.status(200).json({
+        success: true,
+        message:
+          "If that email is registered and unverified, an OTP has been sent.",
+      });
+    }
+
+    if (user.isVerified) {
+      return res
+        .status(400)
+        .json({ success: false, message: "Email already verified" });
+    }
+
+    // Rate limiting: lock if too many attempts
+    if (user.otpLockUntil && Date.now() < user.otpLockUntil) {
+      const minutesLeft = Math.ceil((user.otpLockUntil - Date.now()) / 60000);
+      return res.status(429).json({
+        success: false,
+        message: `Too many attempts. Try again in ${minutesLeft} minutes.`,
+      });
+    }
+
+    // Generate new OTP
+    const newOtp = generateOTP();
+    user.otpCode = newOtp;
+    user.otpExpires = Date.now() + 10 * 60 * 1000;
+    user.otpAttempts = 0; // reset
+    await user.save();
+
+    // Send email
+    let emailSent = false;
+    if (process.env.ENABLE_EMAILS === "true") {
+      const result = await emailService.sendOTPEmail(
+        user.email,
+        user.name,
+        newOtp,
+      );
+      if (result && result.success) emailSent = true;
+    } else {
+      console.log(`[DEV MODE] OTP for ${user.email}: ${newOtp}`);
+      emailSent = true;
+    }
+
+    if (!emailSent) {
+      return res
+        .status(500)
+        .json({ success: false, message: "Failed to send OTP email" });
+    }
+
+    res.json({
+      success: true,
+      message: "Verification code sent. Check your email.",
+      ...(process.env.ENABLE_EMAILS !== "true" && { devOtp: newOtp }),
+    });
+  } catch (error) {
+    console.error(error);
+    res.status(500).json({ success: false, message: "Server error" });
+  }
+};
+
+// @desc    Verify OTP
+// @route   POST /api/auth/verify-otp
+// @access  Public
+const verifyOTP = async (req, res) => {
+  try {
+    const { email, otp } = req.body;
+    console.log("=== VERIFY OTP START ===");
+    console.log("Email:", email, "OTP:", otp);
+
+    if (!email || !otp) {
+      return res
+        .status(400)
+        .json({ success: false, message: "Email and OTP are required" });
+    }
+
+    const user = await User.findOne({ email: email.toLowerCase() });
+    if (!user) {
+      console.log("User not found");
+      return res
+        .status(404)
+        .json({ success: false, message: "User not found" });
+    }
+
+    console.log("User found:", user._id);
+    console.log("User.isVerified:", user.isVerified);
+    console.log("Stored OTP Code:", user.otpCode, "Type:", typeof user.otpCode);
+    console.log("Received OTP:", otp, "Type:", typeof otp);
+    console.log("OTP Expires at:", user.otpExpires);
+
+    if (user.isVerified) {
+      return res
+        .status(400)
+        .json({ success: false, message: "Email already verified" });
+    }
+
+    // Check lock
+    if (user.otpLockUntil && Date.now() < user.otpLockUntil) {
+      const minutesLeft = Math.ceil((user.otpLockUntil - Date.now()) / 60000);
+      return res.status(429).json({
+        success: false,
+        message: `Too many failed attempts. Try again in ${minutesLeft} minutes.`,
+      });
+    }
+
+    // Compare as strings (ensure both are strings)
+    const storedOtp = user.otpCode ? user.otpCode.toString() : null;
+    const enteredOtp = otp.toString();
+
+    console.log("Stored OTP (string):", storedOtp);
+    console.log("Entered OTP (string):", enteredOtp);
+    console.log("Do they match?", storedOtp === enteredOtp);
+
+    if (!storedOtp || storedOtp !== enteredOtp) {
+      // Increment attempts
+      user.otpAttempts = (user.otpAttempts || 0) + 1;
+      if (user.otpAttempts >= 5) {
+        user.otpLockUntil = Date.now() + 15 * 60 * 1000;
+        user.otpAttempts = 0;
+        await user.save();
+        return res.status(429).json({
+          success: false,
+          message: "Too many failed attempts. Try again in 15 minutes.",
+        });
+      }
+      await user.save();
+      return res
+        .status(400)
+        .json({ success: false, message: "Invalid verification code" });
+    }
+
+    // Check expiration
+    const now = Date.now();
+    const expiresAt = new Date(user.otpExpires).getTime();
+    console.log("Current time:", now, "Expires at:", expiresAt);
+    if (now > expiresAt) {
+      return res
+        .status(400)
+        .json({ success: false, message: "Code expired. Request a new one." });
+    }
+
+    // Mark verified
+    user.isVerified = true;
+    user.otpCode = null;
+    user.otpExpires = null;
+    user.otpAttempts = 0;
+    user.otpLockUntil = null;
+    await user.save();
+
+    // Generate token only after successful verification
+    const token = generateToken(user._id);
+
+    res.json({
+      success: true,
+      message: "Email verified successfully!",
+      token,
+      user: {
+        _id: user._id,
+        name: user.name,
+        email: user.email,
+        role: user.role,
+        isVerified: true,
+      },
+    });
+  } catch (error) {
+    console.error("VERIFY OTP ERROR:", error);
+    res
+      .status(500)
+      .json({ success: false, message: "Server error", error: error.message });
+  }
+};
 // @desc    Get user profile
 // @route   GET /api/auth/profile
 // @access  Private
@@ -505,9 +643,13 @@ const forgotPassword = async (req, res) => {
 
     const user = await User.findOne({ email: email.toLowerCase() });
     if (!user) {
-      return res
-        .status(404)
-        .json({ success: false, message: "User not found" });
+      // Do not reveal that email doesn't exist
+      console.log(`Password reset requested for non-existent email: ${email}`);
+      return res.json({
+        success: true,
+        message:
+          "If that email address is registered, you will receive a password reset link.",
+      });
     }
 
     // Generate reset token
@@ -601,4 +743,6 @@ module.exports = {
   updateUserProfile,
   forgotPassword,
   resetPassword,
+  sendOTP,
+  verifyOTP,
 };

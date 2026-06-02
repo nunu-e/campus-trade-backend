@@ -57,17 +57,20 @@ const listingSchema = new mongoose.Schema({
     },
   },
   rentalPeriod: {
-    start: {
-      type: Date,
+    duration: {
+      type: Number,
       required: function () {
         return this.category === "Rentals";
       },
+      min: 1,
     },
-    end: {
-      type: Date,
+    unit: {
+      type: String,
       required: function () {
         return this.category === "Rentals";
       },
+      enum: ["Day", "Week", "Month"],
+      default: "Day",
     },
   },
   serviceType: {

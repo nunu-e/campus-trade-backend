@@ -1,157 +1,145 @@
 // services/emailService.js
 const nodemailer = require("nodemailer");
-const { templates } = require("../config/emailConfig");
 
 class EmailService {
   constructor() {
     if (process.env.ENABLE_EMAILS === "true") {
-      // Only initialize transporter when credentials are present
-      if (!process.env.EMAIL_USER || !process.env.EMAIL_PASS) {
-        console.error(
-          "❌ EMAIL_USER or EMAIL_PASS not provided. Email disabled.",
-        );
+      if (
+        !process.env.SMTP_HOST ||
+        !process.env.SMTP_USER ||
+        !process.env.SMTP_PASS
+      ) {
+        console.error("❌ SMTP credentials missing. Email disabled.");
         this.transporter = null;
         return;
       }
 
-      // Create transporter for real email sending
       this.transporter = nodemailer.createTransport({
-        host: process.env.EMAIL_HOST,
-        port: parseInt(process.env.EMAIL_PORT) || 587,
-        secure: false, // true for 465, false for other ports
+        host: process.env.SMTP_HOST,
+        port: parseInt(process.env.SMTP_PORT) || 587,
+        secure: process.env.SMTP_ENCRYPTION === "tls" ? false : true, // true for 465, false for others
         auth: {
-          user: process.env.EMAIL_USER,
-          pass: process.env.EMAIL_PASS,
+          user: process.env.SMTP_USER,
+          pass: process.env.SMTP_PASS,
+        },
+        tls: {
+          rejectUnauthorized: false, // only for development, remove in production
         },
       });
 
-      // Verify connection (log once)
+      // Verify connection
       this.transporter.verify((err, success) => {
         if (err) {
           console.error(
             "❌ Email transporter verification failed:",
-            err.message || err,
+            err.message,
           );
         } else {
-          console.log("✅ Email transporter ready to send messages");
+          console.log("✅ Email transporter ready (Brevo SMTP)");
         }
       });
+    } else {
+      this.transporter = null;
+      console.log("⚠️ Emails disabled (ENABLE_EMAILS != true)");
     }
   }
 
-  async sendVerificationEmail(email, name, verificationCode) {
+  async sendOTPEmail(email, name, otp) {
+    if (process.env.ENABLE_EMAILS !== "true") {
+      console.log(`[DEV MODE] OTP for ${email}: ${otp}`);
+      return { success: true, devMode: true, otp };
+    }
+
+    if (!this.transporter) {
+      console.error("❌ Email transporter not configured");
+      return { success: false, error: "Email service not configured" };
+    }
+
+    const mailOptions = {
+      from: `"${process.env.SENDER_NAME}" <${process.env.SENDER_EMAIL}>`,
+      to: email,
+      subject: "CampusTrade Email Verification Code",
+      html: `
+        <div style="font-family: Arial, sans-serif; max-width: 600px;">
+          <h2>Email Verification</h2>
+          <p>Hello ${name},</p>
+          <p>Your verification code is:</p>
+          <div style="font-size: 32px; font-weight: bold; padding: 10px; background: #f0f0f0; text-align: center;">
+            ${otp}
+          </div>
+          <p>This code expires in <strong>10 minutes</strong>.</p>
+          <p>If you did not request this, please ignore this email.</p>
+          <p>Best regards,<br/>CampusTrade Team</p>
+        </div>
+      `,
+      text: `Your verification code is: ${otp}. It expires in 10 minutes.`,
+    };
+
     try {
-      const verificationLink = `${process.env.APP_URL || "http://localhost:3000"}/verify/${verificationCode}`;
-
-      if (process.env.ENABLE_EMAILS !== "true") {
-        console.log("DEV MODE - Verification link:", verificationLink);
-        return {
-          success: true,
-          link: verificationLink,
-          code: verificationCode,
-        };
-      }
-
-      // Check if transporter is available
-      if (!this.transporter) {
-        console.error("❌ Email transporter not configured");
-        return { 
-          success: false, 
-          error: "Email transporter not configured. Check EMAIL_USER and EMAIL_PASS environment variables." 
-        };
-      }
-
-      const mailOptions = {
-        from: `"CampusTrade" <${process.env.EMAIL_USER}>`,
-        to: email,
-        subject: templates.verification.subject,
-        html: templates.verification.text(name, verificationLink),
-        // Plain text fallback
-        text: `Dear ${name},\n\nPlease verify your email address by clicking the following link:\n\n${verificationLink}\n\nIf the link doesn't work, copy and paste it into your browser.\n\nThis link will expire in 24 hours.\n\nCampusTrade Team`,
-      };
-
       const info = await this.transporter.sendMail(mailOptions);
-      console.log("✅ Verification email sent successfully to:", email);
-      console.log("   Message ID:", info.messageId);
-
-      return { success: true, link: verificationLink, code: verificationCode, messageId: info.messageId };
+      console.log(
+        `✅ OTP email sent to ${email}, messageId: ${info.messageId}`,
+      );
+      return { success: true, messageId: info.messageId };
     } catch (error) {
-      console.error("❌ Failed to send verification email:", error.message);
-      console.error("   Error details:", error);
+      console.error("❌ Failed to send OTP email:", error.message);
       return { success: false, error: error.message };
     }
   }
 
   async sendWelcomeEmail(email, name) {
+    if (process.env.ENABLE_EMAILS !== "true") {
+      console.log("DEV MODE - Welcome email to:", email);
+      return { success: true };
+    }
+    const mailOptions = {
+      from: `"${process.env.SENDER_NAME}" <${process.env.SENDER_EMAIL}>`,
+      to: email,
+      subject: "Welcome to CampusTrade!",
+      html: `<p>Hello ${name},</p><p>Thank you for joining CampusTrade!</p>`,
+    };
     try {
-      if (process.env.ENABLE_EMAILS !== "true") {
-        console.log("DEV MODE - Welcome email to:", email);
-        return { success: true };
-      }
-
-      const mailOptions = {
-        from: `"CampusTrade" <${process.env.EMAIL_USER}>`,
-        to: email,
-        subject: templates.welcome.subject,
-        html: `<p>${templates.welcome.text(name)}</p>`,
-      };
-
       await this.transporter.sendMail(mailOptions);
-      console.log("✅ Welcome email sent to:", email);
       return { success: true };
     } catch (error) {
-      console.error("❌ Failed to send welcome email:", error.message);
       return { success: false, error: error.message };
     }
   }
 
   async sendNotificationEmail(email, subject, message) {
+    if (process.env.ENABLE_EMAILS !== "true") {
+      console.log("DEV MODE - Notification to:", email);
+      return { success: true };
+    }
+    const mailOptions = {
+      from: `"${process.env.SENDER_NAME}" <${process.env.SENDER_EMAIL}>`,
+      to: email,
+      subject,
+      html: `<p>${message}</p>`,
+    };
     try {
-      if (process.env.ENABLE_EMAILS !== "true") {
-        console.log("DEV MODE - Notification email to:", email);
-        return { success: true };
-      }
-
-      const mailOptions = {
-        from: `"CampusTrade" <${process.env.EMAIL_USER}>`,
-        to: email,
-        subject,
-        html: `<p>${message}</p>`,
-      };
-
       await this.transporter.sendMail(mailOptions);
-      console.log("✅ Notification email sent to:", email);
       return { success: true };
     } catch (error) {
-      console.error("❌ Failed to send notification email:", error.message);
       return { success: false, error: error.message };
     }
   }
 
   async sendResetPasswordEmail(email, name, resetLink) {
+    if (process.env.ENABLE_EMAILS !== "true") {
+      console.log("DEV MODE - Reset link:", resetLink);
+      return { success: true, link: resetLink };
+    }
+    const mailOptions = {
+      from: `"${process.env.SENDER_NAME}" <${process.env.SENDER_EMAIL}>`,
+      to: email,
+      subject: "Reset your CampusTrade password",
+      html: `<p>Dear ${name},</p><p>Use the link below to reset your password (valid for 1 hour):</p><p><a href="${resetLink}">${resetLink}</a></p>`,
+    };
     try {
-      if (process.env.ENABLE_EMAILS !== "true") {
-        console.log("DEV MODE - Reset link:", resetLink);
-        return { success: true, link: resetLink };
-      }
-
-      if (!this.transporter) {
-        console.error("Email transporter not configured");
-        return { success: false, error: "transporter not configured" };
-      }
-
-      const mailOptions = {
-        from: `"CampusTrade" <${process.env.EMAIL_USER}>`,
-        to: email,
-        subject: "Reset your CampusTrade password",
-        html: `<p>Dear ${name},</p><p>Use the link below to reset your password (valid for 1 hour):</p><p><a href="${resetLink}">${resetLink}</a></p>`,
-      };
-
       await this.transporter.sendMail(mailOptions);
-      console.log("✅ Reset password email sent to:", email);
       return { success: true };
     } catch (error) {
-      console.error("❌ Failed to send reset email:", error.message);
       return { success: false, error: error.message };
     }
   }

@@ -3,7 +3,9 @@ const dotenv = require("dotenv");
 const cors = require("cors");
 const http = require("http");
 const connectDB = require("./config/database");
-
+const { notFound, errorHandler } = require("./middleware/errorMiddleware");
+const helmet = require("helmet");
+const mongoSanitize = require("express-mongo-sanitize");
 // Load env vars
 dotenv.config();
 
@@ -11,9 +13,7 @@ dotenv.config();
 const requiredEnvVars = ["MONGO_URI", "JWT_SECRET"];
 requiredEnvVars.forEach((envVar) => {
   if (!process.env[envVar]) {
-    console.error(
-      `❌ ERROR: ${envVar} is not defined in environment variables`,
-    );
+    console.error(` ERROR: ${envVar} is not defined in environment variables`);
     process.exit(1);
   }
 });
@@ -23,7 +23,11 @@ connectDB();
 
 const app = express();
 const server = http.createServer(app);
+// Security headers
+app.use(helmet());
 
+// Remove X-Powered-By (helmet already does it, but explicit for clarity)
+app.disable("x-powered-by");
 // 1. CORS Middleware
 const FRONTEND_URL =
   process.env.FRONTEND_URL || "https://campus-trade-frontend.netlify.app";
@@ -53,8 +57,10 @@ app.use((req, res, next) => {
 });
 
 // 2. Body Parser Middleware
-app.use(express.json());
-app.use(express.urlencoded({ extended: true }));
+// Increase limit for image uploads (base64 encoded images)
+app.use(express.json({ limit: "20mb" }));
+app.use(express.urlencoded({ extended: true, limit: "20mb" }));
+app.use(mongoSanitize());
 
 // 3. Request Logger
 app.use((req, res, next) => {
@@ -107,27 +113,10 @@ app.use("/api/admin", adminRoutes);
 app.use("/api/reports", reportRoutes);
 
 // 8. 404 Handler
-app.use("*", (req, res) => {
-  console.log(`404: ${req.method} ${req.originalUrl}`);
-  res.status(404).json({
-    success: false,
-    error: "Route not found",
-    message: `The route ${req.originalUrl} does not exist`,
-  });
-});
+app.use(notFound);
 
 // 9. Error Handler
-app.use((err, req, res, next) => {
-  console.error("Server Error:", err.stack);
-  res.status(500).json({
-    success: false,
-    error: "Internal Server Error",
-    message:
-      process.env.NODE_ENV === "production"
-        ? "Something went wrong"
-        : err.message,
-  });
-});
+app.use(errorHandler);
 
 const PORT = process.env.PORT || 5000;
 

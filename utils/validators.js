@@ -13,13 +13,7 @@ const registerValidator = [
     .notEmpty()
     .withMessage("Email is required")
     .isEmail()
-    .withMessage("Please enter a valid email")
-    .custom((value) => {
-      if (!value.endsWith("@aau.edu.et")) {
-        throw new Error("Please use your AAU email address (@aau.edu.et)");
-      }
-      return true;
-    }),
+    .withMessage("Please enter a valid email address"), // No AAU-specific rule
 
   body("password")
     .notEmpty()
@@ -98,15 +92,19 @@ const listingValidator = [
     .notEmpty()
     .withMessage("Service type is required for services"),
 
-  body("rentalPeriod.start")
+  body("rentalPeriod.duration")
     .if(body("category").equals("Rentals"))
     .notEmpty()
-    .withMessage("Rental start date is required"),
+    .withMessage("Rental duration is required")
+    .isInt({ min: 1 })
+    .withMessage("Rental duration must be at least 1"),
 
-  body("rentalPeriod.end")
+  body("rentalPeriod.unit")
     .if(body("category").equals("Rentals"))
     .notEmpty()
-    .withMessage("Rental end date is required"),
+    .withMessage("Rental unit is required")
+    .isIn(["Day", "Week", "Month"])
+    .withMessage("Rental unit must be Day, Week, or Month"),
 ];
 
 const messageValidator = [
