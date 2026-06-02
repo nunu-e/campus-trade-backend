@@ -1,67 +1,63 @@
 // services/emailService.js
-const Brevo = require("@getbrevo/brevo");
-
-let apiInstance = null;
-
-const initBrevo = () => {
-  if (!process.env.BREVO_API_KEY) {
-    console.error("❌ BREVO_API_KEY not set. Email sending disabled.");
-    return null;
-  }
-  const defaultClient = Brevo.ApiClient.instance;
-  const apiKey = defaultClient.authentications["api-key"];
-  apiKey.apiKey = process.env.BREVO_API_KEY;
-  return new Brevo.TransactionalEmailsApi();
-};
+const axios = require("axios");
 
 class EmailService {
   constructor() {
-    if (process.env.ENABLE_EMAILS === "true") {
-      apiInstance = initBrevo();
-      if (apiInstance) {
-        console.log("✅ Brevo HTTP API ready (HTTPS)");
-      } else {
-        console.error("❌ Brevo API initialization failed");
-      }
+    this.apiKey = process.env.BREVO_API_KEY;
+    this.senderEmail = process.env.SENDER_EMAIL;
+    this.senderName = process.env.SENDER_NAME || "CampusTrade";
+    this.enabled = process.env.ENABLE_EMAILS === "true";
+
+    if (this.enabled && !this.apiKey) {
+      console.error("❌ BREVO_API_KEY missing. Email disabled.");
+      this.enabled = false;
+    }
+    if (this.enabled) {
+      console.log("✅ Brevo HTTP API ready (HTTPS)");
     } else {
-      console.log("⚠️ Emails disabled (ENABLE_EMAILS != true)");
+      console.log(
+        "⚠️ Emails disabled (ENABLE_EMAILS != true or missing API key)",
+      );
     }
   }
 
-  // Helper to send a transactional email
   async _sendEmail(toEmail, toName, subject, htmlContent, textContent) {
-    if (process.env.ENABLE_EMAILS !== "true") {
+    if (!this.enabled) {
       console.log(`[DEV MODE] Would send email to ${toEmail}: ${subject}`);
       return { success: true, devMode: true };
     }
 
-    if (!apiInstance) {
-      console.error("❌ Brevo API not initialized");
-      return { success: false, error: "Email service not configured" };
-    }
-
-    const sender = {
-      email: process.env.SENDER_EMAIL || "noreply@campustrade.com",
-      name: process.env.SENDER_NAME || "CampusTrade",
+    const url = "https://api.brevo.com/v3/smtp/email";
+    const payload = {
+      sender: { email: this.senderEmail, name: this.senderName },
+      to: [{ email: toEmail, name: toName }],
+      subject: subject,
+      htmlContent: htmlContent,
+      textContent: textContent,
     };
-    const recipients = { to: [{ email: toEmail, name: toName }] };
-
-    const sendSmtpEmail = new Brevo.SendSmtpEmail();
-    sendSmtpEmail.sender = sender;
-    sendSmtpEmail.to = recipients.to;
-    sendSmtpEmail.subject = subject;
-    sendSmtpEmail.htmlContent = htmlContent;
-    sendSmtpEmail.textContent = textContent;
 
     try {
-      const result = await apiInstance.sendTransacEmail(sendSmtpEmail);
+      const response = await axios.post(url, payload, {
+        headers: {
+          "api-key": this.apiKey,
+          "Content-Type": "application/json",
+          Accept: "application/json",
+        },
+        timeout: 10000,
+      });
       console.log(
-        `✅ Email sent to ${toEmail}, messageId: ${result.messageId}`,
+        `✅ Email sent to ${toEmail}, messageId: ${response.data.messageId}`,
       );
-      return { success: true, messageId: result.messageId };
+      return { success: true, messageId: response.data.messageId };
     } catch (error) {
-      console.error("❌ Brevo API error:", error);
-      return { success: false, error: error.message || "Failed to send email" };
+      console.error(
+        "❌ Brevo API error:",
+        error.response?.data || error.message,
+      );
+      return {
+        success: false,
+        error: error.response?.data?.message || error.message,
+      };
     }
   }
 
