@@ -1,44 +1,143 @@
-# Campus Trade (Backend)
+# Campus Trade Backend
+
+REST API powering Campus Trade, a full-stack marketplace designed for students to buy and sell products within a campus community.
 
 ## Overview
-Backend API for Campus Trade marketplace platform. Handles authentication, users, and product management.
+
+Campus Trade provides a backend service for managing users, products, authentication, and marketplace interactions.
+
+The backend follows a modular architecture separating routing, controllers, services, models, middleware, and configuration.
 
 ## Features
-- User authentication (JWT)
-- CRUD operations for products
-- Secure API routes
-- User management
-- Image upload support (if used)
+
+* JWT-based authentication
+* User registration and login
+* Protected API routes
+* Product creation and management
+* Product ownership and authorization
+* Marketplace data management
+* MongoDB persistence
+* RESTful API architecture
+* Middleware-based request processing
+* Real-time communication
+* Automated tests
+* Deployment configuration
 
 ## Tech Stack
-- Node.js
-- Express.js
-- MongoDB + Mongoose
-- JWT
 
-## Setup Instructions
-git clone https://github.com/nunu-e/campus-trade-backend.git  
-cd campus-trade-backend  
-npm install  
-npm run dev  
+* Node.js
+* Express.js
+* MongoDB
+* Mongoose
+* JWT
+* JavaScript
+* Socket.IO
+* Jest
+* GitHub
+* Render
 
+## Architecture
 
-## Environment Variables
+The application separates responsibilities across controllers, services, models, routes, middleware, and utilities.
 
-Create a `.env` file in the root directory and add:
+```text
+Client
+   |
+   v
+Express API
+   |
+   +---- Middleware
+   |
+   +---- Controllers
+   |
+   +---- Services
+   |
+   v
+MongoDB
+```
 
-MONGO_URI=your_mongodb_connection_string  
-PORT=5000  
-JWT_SECRET=your_secret_key 
+Real-time functionality is handled separately through the socket layer.
 
-## API Endpoints
-- POST /api/auth/register  
-- POST /api/auth/login  
-- GET /api/products  
-- POST /api/products  
-- DELETE /api/products/:id  
+## Project Structure
+
+```text
+src/
+├── config/
+├── controllers/
+├── middleware/
+├── models/
+├── routes/
+├── services/
+├── socket/
+├── utils/
+└── ...
+```
+
+## Getting Started
+
+### Prerequisites
+
+* Node.js
+* npm
+* MongoDB
+
+### Installation
+
+```bash
+git clone https://github.com/nunu-e/campus-trade-backend.git
+cd campus-trade-backend
+npm install
+```
+
+### Environment Variables
+
+Create a `.env` file based on `.env.example`.
+
+```env
+PORT=
+MONGO_URI=
+JWT_SECRET=
+```
+
+Never commit real credentials or secrets.
+
+### Run Locally
+
+```bash
+npm run dev
+```
+
+## API
+
+The API provides endpoints for authentication, users, products, and marketplace functionality.
+
+Refer to the source routes and API documentation for the complete endpoint list.
+
+## Testing
+
+Run the test suite with:
+
+```bash
+npm test
+```
+
+## Deployment
+
+The backend includes deployment configuration for hosting as a Node.js service.
+
+## Engineering Notes
+
+The backend uses separation of concerns between HTTP handling, business logic, persistence, and supporting services.
+
+Authentication and authorization are implemented through middleware and JWT-based access control.
 
 ## Future Improvements
-- Real-time chat
-- Advanced filtering
-- Payment integration
+
+* Expand automated test coverage
+* Improve API documentation
+* Add additional observability and logging
+* Introduce more comprehensive integration testing
+
+## License
+
+This project is for educational and portfolio purposes.
